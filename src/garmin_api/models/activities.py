@@ -1,0 +1,165 @@
+"""Activities, and the per-set strength detail that is the point of all this.
+
+Garmin's own field names are kept in ``raw`` so nothing is lost, but the typed
+surface is normalised: weights in kilograms, instants as timezone-aware
+datetimes, durations in seconds.
+"""
+
+from __future__ import annotations
+
+from datetime import datetime
+from typing import Any, Self
+
+from pydantic import Field
+
+from .common import ApiModel, first, grams_to_kg, parse_dt
+
+
+class ActivityType(ApiModel):
+    type_id: int | None = None
+    type_key: str | None = Field(default=None, description='e.g. "strength_training".')
+    parent_type_id: int | None = None
+
+    @classmethod
+    def from_garmin(cls, payload: dict[str, Any] | None) -> ActivityType | None:
+        if not payload:
+            return None
+        return cls(
+            type_id=payload.get("typeId"),
+            type_key=payload.get("typeKey"),
+            parent_type_id=payload.get("parentTypeId"),
+        )
+
+
+class ActivitySummary(ApiModel):
+    """One activity as it appears in a list."""
+
+    activity_id: int
+    name: str | None = None
+    activity_type: ActivityType | None = None
+    start_time: datetime | None = Field(default=None, description="Start instant, UTC.")
+    start_time_local: datetime | None = Field(
+        default=None, description="Start as shown on the watch, no offset applied."
+    )
+    duration_s: float | None = None
+    elapsed_duration_s: float | None = None
+    moving_duration_s: float | None = None
+    distance_m: float | None = None
+    calories: float | None = None
+    average_hr: float | None = None
+    max_hr: float | None = None
+    steps: int | None = None
+    has_sets: bool = Field(
+        default=False,
+        description="Whether Garmin recorded per-set strength detail for this activity.",
+    )
+    raw: dict[str, Any] | None = None
+
+    @classmethod
+    def from_garmin(cls, payload: dict[str, Any], *, include_raw: bool = False) -> Self:
+        return cls(
+            activity_id=int(first(payload, "activityId", "activityid") or 0),
+            name=first(payload, "activityName", "activity_name"),
+            activity_type=ActivityType.from_garmin(payload.get("activityType")),
+            start_time=parse_dt(first(payload, "startTimeGMT", "beginTimestamp")),
+            start_time_local=parse_dt(payload.get("startTimeLocal")),
+            duration_s=first(payload, "duration"),
+            elapsed_duration_s=first(payload, "elapsedDuration"),
+            moving_duration_s=first(payload, "movingDuration"),
+            distance_m=first(payload, "distance"),
+            calories=first(payload, "calories"),
+            average_hr=first(payload, "averageHR", "avgHr"),
+            max_hr=first(payload, "maxHR", "maxHr"),
+            steps=first(payload, "steps"),
+            has_sets=bool(first(payload, "hasSplits", "strokes") is not None)
+            or (payload.get("activityType") or {}).get("typeKey") == "strength_training",
+            raw=payload if include_raw else None,
+        )
+
+
+class Activity(ActivitySummary):
+    """A single activity fetched on its own.
+
+    Same shape as the list entry; Garmin returns more fields here, and they
+    live in ``raw``.
+    """
+
+
+class StrengthSet(ApiModel):
+    """One set of one exercise.
+
+    ``set_type`` is ``ACTIVE`` for a working set and ``REST`` for the gap
+    between them; Garmin records both, and the rests are usually not what a
+    caller wants, so services filter them by default.
+    """
+
+    set_number: int | None = None
+    set_type: str | None = None
+    exercise_category: str | None = Field(default=None, description='e.g. "BENCH_PRESS".')
+    exercise_name: str | None = Field(default=None, description='e.g. "BARBELL_BENCH_PRESS".')
+    reps: int | None = None
+    weight_kg: float | None = None
+    duration_s: float | None = None
+    start_time: datetime | None = None
+    raw: dict[str, Any] | None = None
+
+    @property
+    def is_rest(self) -> bool:
+        return (self.set_type or "").upper() == "REST"
+
+    @classmethod
+    def from_garmin(
+        cls, payload: dict[str, Any], *, index: int | None = None, include_raw: bool = False
+    ) -> StrengthSet:
+        # Garmin nests the exercise under a list, ranked by its own guess at
+        # what the wrist movement was. The first entry is the chosen one.
+        exercises = payload.get("exercises") or []
+        chosen = exercises[0] if exercises else {}
+        return cls(
+            set_number=first(payload, "setNumber", "messageIndex") or index,
+            set_type=first(payload, "setType"),
+            exercise_category=chosen.get("category"),
+            exercise_name=chosen.get("name"),
+            reps=first(payload, "repetitionCount", "repetitions", "reps"),
+            weight_kg=grams_to_kg(first(payload, "weight", "weightValue")),
+            duration_s=first(payload, "duration"),
+            start_time=parse_dt(first(payload, "startTime", "startTimeGMT")),
+            raw=payload if include_raw else None,
+        )
+
+
+class ActivitySets(ApiModel):
+    """Every set of one activity, with a little arithmetic already done."""
+
+    activity_id: int
+    sets: list[StrengthSet] = Field(default_factory=list)
+
+    @property
+    def working_sets(self) -> list[StrengthSet]:
+        return [s for s in self.sets if not s.is_rest]
+
+    @property
+    def total_volume_kg(self) -> float:
+        """Sum of reps times weight over the working sets.
+
+        The usual definition of training volume. Sets with no weight recorded
+        (bodyweight work) contribute nothing, which is the conventional
+        treatment rather than a claim that they were easy.
+        """
+        return round(
+            sum((s.reps or 0) * (s.weight_kg or 0.0) for s in self.working_sets),
+            2,
+        )
+
+    @classmethod
+    def from_garmin(
+        cls, activity_id: int, payload: dict[str, Any], *, include_raw: bool = False
+    ) -> ActivitySets:
+        rows = payload.get("exerciseSets") or []
+        return cls(
+            activity_id=activity_id,
+            sets=[
+                StrengthSet.from_garmin(row, index=i + 1, include_raw=include_raw)
+                for i, row in enumerate(rows)
+            ],
+        )

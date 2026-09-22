@@ -1,0 +1,23 @@
+{
+  "name": "Push A",
+  "start_time": "2026-09-21T07:00:00+02:00",
+  "exercises": [
+    {
+      "category": "BENCH_PRESS",
+      "exercise_name": "BARBELL_BENCH_PRESS",
+      "sets": [
+        { "reps": 10, "weight_kg": 60.0, "rest_s": 120 },
+        { "reps": 8, "weight_kg": 65.0, "rest_s": 120 },
+        { "reps": 6, "weight_kg": 70.0, "rest_s": 120 }
+      ]
+    },
+    {
+      "category": "SHOULDER_PRESS",
+      "exercise_name": "DUMBBELL_SHOULDER_PRESS",
+      "sets": [
+        { "reps": 12, "weight_kg": 20.0, "rest_s": 90 },
+        { "reps": 12, "weight_kg": 20.0, "rest_s": 90 }
+      ]
+    }
+  ]
+}
