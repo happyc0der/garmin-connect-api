@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "garmin": {
+      "type": "stdio",
+      "command": "uv",
+      "args": ["run", "--project", ".", "garmin", "mcp"],
+      "env": {}
+    }
+  }
+}
