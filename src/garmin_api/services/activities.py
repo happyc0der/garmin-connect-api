@@ -30,18 +30,59 @@ def list_activities(
     ``limit`` is applied here instead. ``activity_type`` takes Garmin's own
     keys, e.g. ``strength_training``, ``running``, ``cycling``.
     """
+    parent, subtype = resolve_type(activity_type)
     if start_date:
+        # The date-range endpoint takes a top-level type only, so a sub-type is
+        # narrowed here after fetching its parent.
         rows = auth.call(
             "get_activities_by_date",
             as_date_str(start_date),
             as_date_str(end_date) if end_date else None,
-            activity_type,
+            parent,
         )
-        rows = list(rows or [])[start : start + limit]
+        rows = list(rows or [])
+        if subtype:
+            rows = [r for r in rows if (r.get("activityType") or {}).get("typeKey") == subtype]
+        rows = rows[start : start + limit]
     else:
-        rows = auth.call("get_activities", start, limit, activity_type)
+        rows = auth.call("get_activities", start, limit, parent, subtype)
         rows = list(rows or [])
     return [ActivitySummary.from_garmin(r, include_raw=include_raw) for r in rows]
+
+
+# Garmin's type tree is rooted at "all" (id 17). Its children are the top-level
+# types the list endpoints accept as a type; everything below them, including
+# strength_training and lap_swimming, has to be sent as a sub-type of its parent.
+ROOT_TYPE_ID = 17
+
+_types_cache: list[dict[str, Any]] | None = None
+
+
+def _types() -> list[dict[str, Any]]:
+    global _types_cache
+    if _types_cache is None:
+        _types_cache = list(auth.call("get_activity_types") or [])
+    return _types_cache
+
+
+def resolve_type(type_key: str | None) -> tuple[str | None, str | None]:
+    """Split a type key into the (type, sub-type) pair Garmin's list wants.
+
+    ``running`` -> ``("running", None)``;
+    ``strength_training`` -> ``("fitness_equipment", "strength_training")``.
+    An unknown key is passed through unchanged so Garmin can say what is wrong.
+    Costs one call per process, the first time a filter is used.
+    """
+    if not type_key:
+        return None, None
+    by_key = {t.get("typeKey"): t for t in _types()}
+    entry = by_key.get(type_key)
+    if entry is None or entry.get("parentTypeId") in (None, ROOT_TYPE_ID):
+        return type_key, None
+    parent = next((t for t in _types() if t.get("typeId") == entry["parentTypeId"]), None)
+    if parent is None:
+        return type_key, None
+    return parent.get("typeKey"), type_key
 
 
 def get_activity(activity_id: int | str, *, include_raw: bool = True) -> Activity:

@@ -167,7 +167,7 @@ activity, so a sync that runs again is safe.
 uv run pytest
 ```
 
-50 tests, no network and no account needed. They cover the models against real Garmin payload
+65 tests, no network and no account needed. They cover the models against real Garmin payload
 shapes, the FIT codec's round trip, the whole 1,527-entry exercise catalogue against the FIT
 profile, the HTTP routes, and the generated MCP tool list.
 

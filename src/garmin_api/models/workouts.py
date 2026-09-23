@@ -45,9 +45,12 @@ class WorkoutSummary(ApiModel):
 
 
 class ScheduledWorkout(ApiModel):
-    schedule_id: int | None = None
+    schedule_id: int | None = Field(
+        default=None, description="The calendar entry's id, which unschedule takes."
+    )
     workout_id: int | None = None
     name: str | None = None
+    sport: str | None = None
     day: date | None = None
     raw: dict[str, Any] | None = None
 
@@ -58,6 +61,8 @@ class ScheduledWorkout(ApiModel):
             schedule_id=first(payload, "workoutScheduleId", "id"),
             workout_id=first(workout, "workoutId") or first(payload, "workoutId"),
             name=first(workout, "workoutName") or first(payload, "title"),
+            sport=first(payload, "sportTypeKey")
+            or (workout.get("sportType") or {}).get("sportTypeKey"),
             day=parse_date(first(payload, "calendarDate", "date", "scheduleDate")),
             raw=payload if include_raw else None,
         )

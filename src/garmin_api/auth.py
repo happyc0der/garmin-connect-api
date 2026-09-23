@@ -43,22 +43,47 @@ def token_dir() -> Path:
     return Path(env).expanduser() if env else DEFAULT_TOKEN_DIR
 
 
+def _token_files() -> list[Path]:
+    """The token files present, in whichever format wrote them.
+
+    python-garminconnect 0.3 keeps everything in one ``garmin_tokens.json``,
+    and its own ``token_file_path`` is asked where that is so the two cannot
+    disagree. The older garth layout (``oauth1_token.json`` plus
+    ``oauth2_token.json``) is still recognised, for a token directory shared
+    with tools that have not moved on.
+    """
+    from garminconnect.client import token_file_path
+
+    directory = token_dir()
+    found: list[Path] = []
+    try:
+        current = token_file_path(str(directory))
+        if current.is_file():
+            found.append(current)
+    except ValueError:
+        pass
+    if directory.is_dir():
+        found.extend(directory.glob("oauth*_token.json"))
+    return found
+
+
 def has_tokens() -> bool:
-    d = token_dir()
-    return d.is_dir() and any(d.glob("oauth*token*.json"))
+    return bool(_token_files())
 
 
 def token_age_days() -> float | None:
-    """Age of the oldest stored token, or None if there are none.
+    """Days since the tokens were last written, or None if there are none.
 
-    The OAuth1 token is good for about a year and the OAuth2 one for hours, so
-    this is a rough health signal rather than an expiry.
+    Garmin issues a short-lived access token with a longer refresh token, and
+    the library rewrites the file when it refreshes, so a large number here
+    means the tokens have not been used in a long while rather than that they
+    have expired.
     """
-    files = sorted(token_dir().glob("oauth*token*.json"))
+    files = _token_files()
     if not files:
         return None
-    oldest = min(f.stat().st_mtime for f in files)
-    return (datetime.now(UTC).timestamp() - oldest) / 86400
+    newest = max(f.stat().st_mtime for f in files)
+    return (datetime.now(UTC).timestamp() - newest) / 86400
 
 
 def translate(exc: Exception) -> Exception:
@@ -91,9 +116,15 @@ class Session:
     """Holds the one authenticated client and hands it out under a lock."""
 
     def __init__(self, tokens: Path | None = None) -> None:
-        self._tokens = tokens or token_dir()
+        # Resolved on use rather than captured here, so the location has one
+        # source of truth: the same call has_tokens() makes.
+        self._tokens_override = tokens
         self._client: Garmin | None = None
         self._lock = threading.RLock()
+
+    @property
+    def _tokens(self) -> Path:
+        return self._tokens_override or token_dir()
 
     @property
     def token_path(self) -> Path:

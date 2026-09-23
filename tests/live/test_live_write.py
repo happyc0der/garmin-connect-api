@@ -49,7 +49,17 @@ def test_create_schedule_and_delete_a_workout() -> None:
     assert created.workout_id
 
     try:
-        workouts.schedule(created.workout_id, (datetime.now(UTC) + timedelta(days=1)).date())
+        day = (datetime.now(UTC) + timedelta(days=1)).date()
+        entry = workouts.schedule(created.workout_id, day)
+        assert entry.schedule_id, "unschedule needs this id"
+
+        on_calendar = workouts.scheduled(day.year, day.month)
+        assert entry.schedule_id in {e.schedule_id for e in on_calendar}
+
+        workouts.unschedule(entry.schedule_id)
+        after = workouts.scheduled(day.year, day.month)
+        assert entry.schedule_id not in {e.schedule_id for e in after}
+
         fetched = workouts.get_workout(created.workout_id)
         assert fetched.name == spec.name
     finally:

@@ -315,3 +315,160 @@ class TestWeight:
         _, args = fake_garmin["calls"][0]
         assert args[0] == 81.4
         assert args[1] == "kg"
+
+
+class TestHealthDoesNotHideAccountProblems:
+    """Tolerating a missing metric must not mean tolerating a locked account."""
+
+    @pytest.mark.parametrize("error", ["rate", "auth"])
+    def test_account_errors_propagate(self, fake_garmin: dict[str, Any], error: str) -> None:
+        from garmin_api.errors import NotAuthenticated, RateLimited
+
+        exc = RateLimited("slow down") if error == "rate" else NotAuthenticated("log in")
+
+        def explode(*_: Any) -> Any:
+            raise exc
+
+        fake_garmin["responses"]["get_stats"] = explode
+        with pytest.raises(type(exc)):
+            health.day(date(2026, 9, 21))
+
+        assert len(fake_garmin["calls"]) == 1, "no further calls after the account fails"
+
+
+# A slice of Garmin's real activity type tree: "all" is the root, its children
+# are top-level, and anything deeper is a sub-type.
+TYPES = [
+    {"typeId": 17, "typeKey": "all", "parentTypeId": None},
+    {"typeId": 1, "typeKey": "running", "parentTypeId": 17},
+    {"typeId": 26, "typeKey": "swimming", "parentTypeId": 17},
+    {"typeId": 27, "typeKey": "lap_swimming", "parentTypeId": 26},
+    {"typeId": 29, "typeKey": "fitness_equipment", "parentTypeId": 17},
+    {"typeId": 13, "typeKey": "strength_training", "parentTypeId": 29},
+]
+
+
+class TestActivityTypeFilter:
+    @pytest.fixture(autouse=True)
+    def types(self, fake_garmin: dict[str, Any], monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(activities, "_types_cache", None)
+        fake_garmin["responses"]["get_activity_types"] = TYPES
+
+    def test_a_top_level_type_is_sent_as_is(self) -> None:
+        assert activities.resolve_type("running") == ("running", None)
+
+    def test_strength_is_a_sub_type_of_fitness_equipment(self) -> None:
+        """Sending strength_training as a type earns a 400 from Garmin."""
+        assert activities.resolve_type("strength_training") == (
+            "fitness_equipment",
+            "strength_training",
+        )
+
+    def test_list_sends_the_sub_type_separately(self, fake_garmin: dict[str, Any]) -> None:
+        fake_garmin["responses"]["get_activities"] = []
+        activities.list_activities(activity_type="lap_swimming")
+        name, args = fake_garmin["calls"][-1]
+        assert name == "get_activities"
+        assert args[2:] == ("swimming", "lap_swimming")
+
+    def test_a_date_range_narrows_the_sub_type_itself(self, fake_garmin: dict[str, Any]) -> None:
+        fake_garmin["responses"]["get_activities_by_date"] = [
+            {"activityId": 1, "activityType": {"typeKey": "lap_swimming"}},
+            {"activityId": 2, "activityType": {"typeKey": "open_water_swimming"}},
+        ]
+        found = activities.list_activities(
+            activity_type="lap_swimming", start_date=date(2026, 8, 1)
+        )
+        assert [a.activity_id for a in found] == [1]
+
+
+class TestRealDataMappings:
+    """Mistakes that only showed up against a real account."""
+
+    def test_a_swim_is_not_reported_as_having_sets(self, fake_garmin: dict[str, Any]) -> None:
+        swim = {
+            "activityId": 1,
+            "activityType": {"typeKey": "lap_swimming"},
+            "strokes": 900,
+            "hasSplits": True,
+        }
+        fake_garmin["responses"]["get_activities"] = [swim, ACTIVITY_ROW]
+        found = activities.list_activities()
+        assert [a.has_sets for a in found] == [False, True]
+
+    def test_local_start_time_carries_no_false_timezone(self, fake_garmin: dict[str, Any]) -> None:
+        fake_garmin["responses"]["get_activities"] = [ACTIVITY_ROW]
+        only = activities.list_activities()[0]
+        assert only.start_time_local == datetime(2026, 9, 21, 7, 0)
+        assert only.start_time_local.tzinfo is None
+        assert only.start_time is not None and only.start_time.tzinfo is not None
+
+    def test_vigorous_minutes_are_kept(self, fake_garmin: dict[str, Any]) -> None:
+        fake_garmin["responses"].update(
+            {
+                "get_stats": {"moderateIntensityMinutes": 20, "vigorousIntensityMinutes": 15},
+                "get_sleep_data": None,
+                "get_hrv_data": None,
+                "get_training_readiness": None,
+                "get_daily_weigh_ins": None,
+            }
+        )
+        summary = health.day(date(2026, 9, 21))
+        assert summary.moderate_intensity_minutes == 20
+        assert summary.vigorous_intensity_minutes == 15
+
+
+class TestCalendar:
+    """Shapes captured from a real account on 23 Sep 2026."""
+
+    CALENDAR = {
+        "month": 8,
+        "year": 2026,
+        "calendarItems": [
+            {"itemType": "nap", "id": None, "date": "2026-08-21"},
+            {"itemType": "activity", "id": 18800000002, "title": "Pool Swim", "date": "2026-08-20"},
+            {
+                "id": 1600000001,
+                "itemType": "workout",
+                "title": "Push A",
+                "date": "2026-09-28",
+                "sportTypeKey": "strength_training",
+                "workoutId": 1600000002,
+            },
+            # The grid spills into the next month's first days.
+            {
+                "id": 1,
+                "itemType": "workout",
+                "title": "Spill",
+                "date": "2026-10-01",
+                "workoutId": 2,
+            },
+        ],
+    }
+
+    def test_only_workouts_in_the_month_are_returned(self, fake_garmin: dict[str, Any]) -> None:
+        fake_garmin["responses"]["get_scheduled_workouts"] = self.CALENDAR
+        found = workouts.scheduled(2026, 9)
+
+        assert len(found) == 1
+        entry = found[0]
+        assert entry.schedule_id == 1600000001
+        assert entry.workout_id == 1600000002
+        assert entry.name == "Push A"
+        assert entry.sport == "strength_training"
+        assert entry.day == date(2026, 9, 28)
+
+    def test_scheduling_returns_the_schedule_id(self, fake_garmin: dict[str, Any]) -> None:
+        """unschedule takes this id, so the caller must be given it."""
+        fake_garmin["responses"]["schedule_workout"] = {
+            "workoutScheduleId": 1600000001,
+            "workout": {
+                "workoutId": 1600000002,
+                "workoutName": "Push A",
+                "sportType": {"sportTypeKey": "strength_training"},
+            },
+        }
+        entry = workouts.schedule(1600000002, date(2026, 9, 28))
+        assert entry.schedule_id == 1600000001
+        assert entry.workout_id == 1600000002
+        assert entry.day == date(2026, 9, 28)

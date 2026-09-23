@@ -12,7 +12,9 @@ from typing import Any, Self
 
 from pydantic import Field
 
-from .common import ApiModel, first, grams_to_kg, parse_dt
+from .common import ApiModel, first, grams_to_kg, parse_dt, parse_local
+
+STRENGTH_TYPES = frozenset({"strength_training"})
 
 
 class ActivityType(ApiModel):
@@ -39,7 +41,11 @@ class ActivitySummary(ApiModel):
     activity_type: ActivityType | None = None
     start_time: datetime | None = Field(default=None, description="Start instant, UTC.")
     start_time_local: datetime | None = Field(
-        default=None, description="Start as shown on the watch, no offset applied."
+        default=None,
+        description=(
+            "Wall-clock start where the activity happened. Deliberately has no "
+            "timezone: Garmin does not say which zone it is, only the time."
+        ),
     )
     duration_s: float | None = None
     elapsed_duration_s: float | None = None
@@ -51,7 +57,7 @@ class ActivitySummary(ApiModel):
     steps: int | None = None
     has_sets: bool = Field(
         default=False,
-        description="Whether Garmin recorded per-set strength detail for this activity.",
+        description="Whether this is a strength activity, the kind that carries per-set detail.",
     )
     raw: dict[str, Any] | None = None
 
@@ -62,7 +68,7 @@ class ActivitySummary(ApiModel):
             name=first(payload, "activityName", "activity_name"),
             activity_type=ActivityType.from_garmin(payload.get("activityType")),
             start_time=parse_dt(first(payload, "startTimeGMT", "beginTimestamp")),
-            start_time_local=parse_dt(payload.get("startTimeLocal")),
+            start_time_local=parse_local(payload.get("startTimeLocal")),
             duration_s=first(payload, "duration"),
             elapsed_duration_s=first(payload, "elapsedDuration"),
             moving_duration_s=first(payload, "movingDuration"),
@@ -71,8 +77,9 @@ class ActivitySummary(ApiModel):
             average_hr=first(payload, "averageHR", "avgHr"),
             max_hr=first(payload, "maxHR", "maxHr"),
             steps=first(payload, "steps"),
-            has_sets=bool(first(payload, "hasSplits", "strokes") is not None)
-            or (payload.get("activityType") or {}).get("typeKey") == "strength_training",
+            # Only strength activities carry sets. Swims have laps and stroke
+            # counts, which are a different thing and must not read as sets.
+            has_sets=(payload.get("activityType") or {}).get("typeKey") in STRENGTH_TYPES,
             raw=payload if include_raw else None,
         )
 

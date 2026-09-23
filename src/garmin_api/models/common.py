@@ -49,6 +49,17 @@ def parse_dt(value: Any) -> datetime | None:
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
 
+def parse_local(value: Any) -> datetime | None:
+    """Parse a wall-clock time and leave it without a timezone.
+
+    Garmin's ``*Local`` fields are the time on the watch where the activity
+    happened, with no offset given. Tagging one as UTC would state a falsehood
+    -- 19:09 in New York is not 19:09 UTC -- so it stays naive.
+    """
+    parsed = parse_dt(value)
+    return parsed.replace(tzinfo=None) if parsed else None
+
+
 def parse_date(value: Any) -> date | None:
     dt = parse_dt(value)
     return dt.date() if dt else None

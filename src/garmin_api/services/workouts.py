@@ -109,9 +109,20 @@ def delete(workout_id: int | str) -> Any:
     return auth.call("delete_workout", workout_id)
 
 
-def schedule(workout_id: int | str, day: date | str) -> Any:
-    """Put a workout on the calendar for a date."""
-    return auth.call("schedule_workout", workout_id, as_date_str(day))
+def schedule(workout_id: int | str, day: date | str) -> ScheduledWorkout:
+    """Put a workout on the calendar for a date.
+
+    Returns the calendar entry, whose ``schedule_id`` is what
+    :func:`unschedule` takes -- a different number from the workout id.
+    """
+    day_str = as_date_str(day)
+    payload = auth.call("schedule_workout", workout_id, day_str) or {}
+    entry = ScheduledWorkout.from_garmin(payload)
+    if entry.day is None:
+        entry.day = date.fromisoformat(day_str)
+    if entry.workout_id is None:
+        entry.workout_id = int(workout_id)
+    return entry
 
 
 def unschedule(schedule_id: int | str) -> Any:
@@ -120,10 +131,21 @@ def unschedule(schedule_id: int | str) -> Any:
 
 
 def scheduled(year: int, month: int, *, include_raw: bool = False) -> list[ScheduledWorkout]:
-    """Calendar entries for a month. ``month`` is 1-12."""
+    """Workouts scheduled in a month. ``month`` is 1-12.
+
+    Garmin's endpoint is really the whole calendar: completed activities,
+    naps and badges sit beside the scheduled workouts, and the grid spills
+    into the days either side of the month. Both are filtered out here, so
+    this answers only the question its name asks.
+    """
     payload = auth.call("get_scheduled_workouts", year, month) or {}
-    rows = payload.get("calendarItems") or payload.get("workoutScheduleList") or []
-    return [ScheduledWorkout.from_garmin(r, include_raw=include_raw) for r in rows]
+    rows = payload.get("calendarItems") or []
+    entries = [
+        ScheduledWorkout.from_garmin(r, include_raw=include_raw)
+        for r in rows
+        if r.get("itemType") == "workout"
+    ]
+    return [e for e in entries if e.day is None or (e.day.year == year and e.day.month == month)]
 
 
 def push_to_device(workout_id: int | str, device_id: int | str | None = None) -> Any:

@@ -13,6 +13,7 @@ from datetime import date
 from typing import Any
 
 from .. import auth
+from ..errors import NotAuthenticated, RateLimited
 from ..models.common import as_date_str
 from ..models.health import DaySummary, SleepSummary, WeighIn
 
@@ -24,9 +25,16 @@ def _safe(fn_name: str, *args: Any) -> Any:
 
     A day with no sleep data is a normal answer, not a fault, and one missing
     metric must not sink a whole day summary.
+
+    Tolerance stops at the account itself. Not being logged in, and above all
+    being rate limited, are raised: swallowing a 429 here would turn one day
+    summary into five more calls against an account Garmin is already
+    throttling, which is how an account gets locked out.
     """
     try:
         return auth.call(fn_name, *args)
+    except (NotAuthenticated, RateLimited):
+        raise
     except Exception as exc:  # noqa: BLE001 -- deliberately tolerant
         logger.debug("%s failed, treating as no data: %s", fn_name, exc)
         return None

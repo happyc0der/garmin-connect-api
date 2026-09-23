@@ -58,13 +58,18 @@ def create_raw(
     return service.create_raw(workout)
 
 
-@router.post("/{workout_id}/schedule", operation_id="schedule_workout")
+@router.post(
+    "/{workout_id}/schedule", operation_id="schedule_workout", response_model=ScheduledWorkout
+)
 def schedule(
     workout_id: int, day: date = Query(description="The date to schedule it on.")
-) -> dict[str, Any]:
-    """Put a saved workout on the calendar for a date."""
-    service.schedule(workout_id, day)
-    return {"workout_id": workout_id, "scheduled_for": day.isoformat()}
+) -> ScheduledWorkout:
+    """Put a saved workout on the calendar for a date.
+
+    Returns the calendar entry. Its schedule_id, not the workout id, is what
+    unschedule_workout takes.
+    """
+    return service.schedule(workout_id, day)
 
 
 @router.delete("/schedule/{schedule_id}", operation_id="unschedule_workout")

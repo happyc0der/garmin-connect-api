@@ -103,10 +103,15 @@ class DaySummary(ApiModel):
     steps: int | None = None
     step_goal: int | None = None
     distance_m: float | None = None
-    floors_climbed: int | None = None
+    floors_climbed: float | None = Field(
+        default=None, description="Garmin reports floors fractionally, e.g. 2.25."
+    )
     active_calories: float | None = None
     total_calories: float | None = None
-    intensity_minutes: int | None = None
+    moderate_intensity_minutes: int | None = None
+    vigorous_intensity_minutes: int | None = Field(
+        default=None, description="Garmin counts these double toward the weekly goal."
+    )
     resting_hr: int | None = None
     min_hr: int | None = None
     max_hr: int | None = None
@@ -132,7 +137,8 @@ class DaySummary(ApiModel):
             floors_climbed=first(stats, "floorsAscended", "floorsClimbed"),
             active_calories=first(stats, "activeKilocalories"),
             total_calories=first(stats, "totalKilocalories"),
-            intensity_minutes=first(stats, "moderateIntensityMinutes"),
+            moderate_intensity_minutes=first(stats, "moderateIntensityMinutes"),
+            vigorous_intensity_minutes=first(stats, "vigorousIntensityMinutes"),
             resting_hr=first(stats, "restingHeartRate"),
             min_hr=first(stats, "minHeartRate"),
             max_hr=first(stats, "maxHeartRate"),
