@@ -84,7 +84,8 @@ uploads.log_strength_session(StrengthSessionSpec(
 ```
 
 Responses are pydantic models with Garmin's inconsistencies ironed out: weights in kilograms,
-timestamps as timezone-aware datetimes, snake_case throughout. Garmin's untouched payload is
+instants as timezone-aware datetimes, snake_case throughout. Garmin's local wall-clock times,
+such as `start_time_local`, stay without a timezone, because Garmin does not say which one. Garmin's untouched payload is
 still there on `raw` when something is not mapped.
 
 ## HTTP service
@@ -158,8 +159,9 @@ That file can also be imported by hand on the Garmin Connect website, which is u
 would rather not have anything log in on your behalf. The reverse works too: `garmin decode-fit`
 reads a session out of a FIT file or out of the zip Garmin's "Export Original" hands back.
 
-Uploading the same session twice is reported as a duplicate rather than creating a second
-activity, so a sync that runs again is safe.
+The file's serial number is derived from the session, so the same session always encodes to the
+same file. Garmin checks uploads for files it has already seen, and a repeat is reported with a
+status of `duplicate` rather than as a second activity.
 
 ## Tests
 
@@ -167,7 +169,7 @@ activity, so a sync that runs again is safe.
 uv run pytest
 ```
 
-65 tests, no network and no account needed. They cover the models against real Garmin payload
+67 tests, no network and no account needed. They cover the models against real Garmin payload
 shapes, the FIT codec's round trip, the whole 1,527-entry exercise catalogue against the FIT
 profile, the HTTP routes, and the generated MCP tool list.
 

@@ -145,3 +145,21 @@ class TestExerciseMapping:
     def test_generic_entry_has_no_subtype(self) -> None:
         assert fx.subtype_value("BENCH_PRESS", "BENCH_PRESS") is None
         assert fx.subtype_value("BENCH_PRESS", "") is None
+
+
+def test_the_same_session_encodes_identically_by_default(
+    sample_session: StrengthSessionSpec,
+) -> None:
+    """No serial given: the same session must still yield the same file.
+
+    Otherwise every run of a sync looks like a new activity to Garmin.
+    """
+    assert encode_strength_session(sample_session) == encode_strength_session(sample_session)
+
+
+def test_different_sessions_get_different_serials(sample_session: StrengthSessionSpec) -> None:
+    from garmin_api.fit.encode import session_serial
+
+    changed = sample_session.model_copy(update={"name": "Push B"})
+    assert session_serial(changed) != session_serial(sample_session)
+    assert 0 < session_serial(sample_session) < 2**31

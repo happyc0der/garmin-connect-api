@@ -15,7 +15,7 @@ REST, exactly as a watch records them, so the timeline has no holes.
 
 from __future__ import annotations
 
-import random
+import hashlib
 from datetime import UTC, datetime, timedelta
 
 from fit_tool.fit_file_builder import FitFileBuilder
@@ -71,17 +71,27 @@ def _fit_local_seconds(moment: datetime) -> int:
     return int(moment.timestamp() - FIT_EPOCH_OFFSET + offset.total_seconds())
 
 
+def session_serial(spec: StrengthSessionSpec) -> int:
+    """A stable serial number for a session, from its content.
+
+    Same session in, same serial out. 31 bits because the field is an
+    unsigned 32-bit integer in which zero means "invalid".
+    """
+    digest = hashlib.sha256(spec.model_dump_json().encode()).digest()
+    return (int.from_bytes(digest[:4], "big") & 0x7FFFFFFF) or 1
+
+
 def encode_strength_session(spec: StrengthSessionSpec, *, serial: int | None = None) -> bytes:
     """Encode a completed strength session as FIT bytes.
 
-    ``serial`` is the file's serial number. It is part of what makes an upload
-    idempotent: Garmin rejects a second upload of a file with the same serial
-    and creation time as a duplicate, which is the behaviour wanted when a
-    sync runs twice. A random one is generated if none is given.
+    ``serial`` is the file's serial number. By default it is derived from the
+    session itself, so encoding the same session twice yields byte-identical
+    files. That is what lets Garmin's duplicate check catch a sync that runs
+    twice; a random serial would make every run look like a new activity.
     """
     builder = FitFileBuilder(auto_define=True)
     start = spec.start_time if spec.start_time.tzinfo else spec.start_time.replace(tzinfo=UTC)
-    serial_number = serial if serial is not None else random.getrandbits(31)
+    serial_number = serial if serial is not None else session_serial(spec)
 
     file_id = FileIdMessage()
     file_id.type = FileType.ACTIVITY
