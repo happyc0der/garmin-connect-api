@@ -1,5 +1,50 @@
 # Changelog
 
+## 0.2.2 (2026-10-19)
+
+A second review round: a check of 0.2.1's own fixes for regressions, fuzzing of every route and
+tool against odd Garmin replies, property tests of the FIT codec and the exercise search, every
+promise in the docs checked against the code, and every Garmin field checked against
+python-garminconnect's own models. Each finding was reproduced before it was fixed, and each fix
+has a test that fails without it.
+
+### Fixed
+
+- **Trends over long ranges failed outright.** Found live: Garmin refuses a stress or body battery
+  range over 28 days and an HRV range over 366 days, so those trends failed past a month or a year.
+  They are now fetched a window at a time, as the library already does for steps. VO2 max points
+  Garmin groups by week or month are counted as periods, not days.
+- **A search result saved the wrong exercise.** The search gives the variant as `exercise`; the
+  write tools called it `exercise_name` and ignored unknown keys, so "Barbell Bench Press" was saved
+  as plain "Bench Press". Both names are accepted, and unknown keys are now refused.
+- **`match_exercise` could swap one lift for another** in ways 0.2.1 introduced ("Adduction" for
+  "Abduction", "machine row" for the rowing machine), and lost some it used to find ("pullups").
+  Search understands "-ies" plurals and no longer finds "to" in "toes".
+- **An outage looked like no data.** Asked for sleep, HRV, stress, readiness or records alone, a
+  Garmin outage answered as if nothing was recorded; it is now an error. The day summary still
+  leaves out only the part that failed.
+- **Logging sessions.** Notes become the activity's description instead of being dropped. A
+  duplicate no longer renames the activity already there. A failed lookup before an upload no
+  longer stops it. Decoding keeps the session's timezone, keeps sets the watch could not identify,
+  and takes the time between sets as the rest.
+- **Health data.** Readiness on accounts that get a single snapshot, fractional HRV values, the
+  day's last weigh-in rather than the first listed, a set's likeliest exercise, and Garmin's
+  "no reading" stress codes are all read correctly. Sleep times are never taken from Garmin's
+  local fields as UTC.
+- **Security.** An id holding an encoded slash could steer a tool to a different route; such paths
+  are refused. MCP over HTTP no longer refuses writes from a same-origin client.
+- **What a model reads.** The instructions and tool descriptions now say that a logged session may
+  be shared to Strava, that relogging a corrected session makes a second activity, which night a
+  date means, and what each trend's change measures (now the movement of the period averages).
+  Creating a scheduled workout returns its schedule id.
+- Impossible inputs (infinite distances, dates FIT cannot hold, sessions too long for its fields)
+  are refused with a clear error instead of a 500.
+
+### Note
+
+A session's FIT file now records its local time to the exact second, so a session logged by 0.2.0
+or 0.2.1 and logged again may not be recognised by Garmin as a duplicate.
+
 ## 0.2.1 (2026-10-19)
 
 Fixes from a review of the whole package after 0.2.0, each reproduced before it was fixed and
