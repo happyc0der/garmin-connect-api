@@ -17,7 +17,8 @@ strength sessions, and weigh-ins with full body composition.
 v0.2. Reads activities with per-set strength detail, laps and pool-swim lengths, daily health,
 trends over up to two years and named personal records; writes strength, run, ride and swim
 workouts, completed strength sessions, set corrections and weigh-ins with body composition. 41
-tools, every one checked against a real account. Bug reports and feature requests go to
+tools, each checked against a real account except pushing a workout to a watch, which is tested
+offline only. Bug reports and feature requests go to
 [GitHub Issues](https://github.com/happyc0der/garmin-connect-api/issues).
 
 ## Quick start
@@ -209,7 +210,7 @@ something is not mapped.
 tools are generated from these routes, so the two cannot drift apart. Because it can write to your
 account, the service refuses writes from web pages open in your browser and requests naming any
 host but `localhost`, which defeats DNS rebinding. Binding beyond localhost requires
-`GARMIN_API_KEY`.
+`GARMIN_API_KEY`. `garmin mcp --http` serves the MCP tools over HTTP behind the same guard.
 
 ## Configuration
 
@@ -228,7 +229,7 @@ uv sync
 uv run pytest
 ```
 
-231 offline tests, needing no network and no account, run on Linux, macOS and Windows. They cover the models against real Garmin
+309 offline tests, needing no network and no account, run on Linux, macOS and Windows. They cover the models against real Garmin
 response shapes, the FIT codec's round trip, every one of the 1,527 catalogue exercises against
 the FIT profile, the HTTP routes, and every MCP tool's output against its own advertised schema,
 which strict clients enforce.
