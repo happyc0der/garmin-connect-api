@@ -39,7 +39,7 @@ Nothing else ever prompts for a password; without tokens, every tool says to run
 Claude Code:
 
 ```bash
-claude mcp add --scope user --transport stdio garmin -- uvx garmin-connect-api
+claude mcp add --scope user --transport stdio garmin -- uvx garmin-connect-api@latest
 ```
 
 Claude Desktop, in `claude_desktop_config.json` (in `~/Library/Application Support/Claude/` on
@@ -50,11 +50,14 @@ macOS, `%APPDATA%\Claude\` on Windows):
   "mcpServers": {
     "garmin": {
       "command": "uvx",
-      "args": ["garmin-connect-api"]
+      "args": ["garmin-connect-api@latest"]
     }
   }
 }
 ```
+
+`@latest` makes uvx check for a new release each time the server starts. Without it, uvx keeps
+running the first version it downloaded.
 
 **3. Ask.** "How did I sleep this week?", "Did my pace hold up in yesterday's swim?",
 "How has my resting heart rate moved since summer?", "Show my last strength session's sets, and
