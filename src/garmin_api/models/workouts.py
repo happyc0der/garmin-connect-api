@@ -16,9 +16,9 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Annotated, Any, Literal
 
-from pydantic import Discriminator, Field, Tag, field_validator, model_validator
+from pydantic import AliasChoices, Discriminator, Field, Tag, field_validator, model_validator
 
-from .common import ApiModel, first, parse_date, parse_dt
+from .common import EXERCISE_NAME_KEYS, ApiModel, WriteSpec, first, parse_date, parse_dt
 
 
 class WorkoutSummary(ApiModel):
@@ -28,6 +28,13 @@ class WorkoutSummary(ApiModel):
     description: str | None = None
     estimated_duration_s: int | None = None
     updated: datetime | None = None
+    schedule_id: int | None = Field(
+        default=None,
+        description="Set when the workout was just scheduled: what unschedule_workout takes.",
+    )
+    scheduled_on: date | None = Field(
+        default=None, description="Set when the workout was just scheduled: its calendar day."
+    )
     raw: dict[str, Any] | None = None
 
     @classmethod
@@ -68,13 +75,17 @@ class ScheduledWorkout(ApiModel):
         )
 
 
-class StrengthExerciseSpec(ApiModel):
+class StrengthExerciseSpec(WriteSpec):
     """One exercise block in a planned workout: N sets of M reps."""
 
     category: str = Field(description='Garmin exercise category, e.g. "BENCH_PRESS".')
     exercise_name: str = Field(
         default="",
-        description='Variant, e.g. "BARBELL_BENCH_PRESS". Empty means the generic one.',
+        validation_alias=AliasChoices(*EXERCISE_NAME_KEYS),
+        description=(
+            'Variant, e.g. "BARBELL_BENCH_PRESS", as find_exercise gives it under "exercise". '
+            "Empty means the generic one."
+        ),
     )
     sets: int = Field(default=1, ge=1, le=99)
     reps: int = Field(default=10, ge=1, le=999)
@@ -94,7 +105,7 @@ class StrengthExerciseSpec(ApiModel):
         return self
 
 
-class StrengthWorkoutSpec(ApiModel):
+class StrengthWorkoutSpec(WriteSpec):
     """A strength workout to put on the Garmin calendar."""
 
     name: str = Field(min_length=1, max_length=80)
@@ -105,7 +116,7 @@ class StrengthWorkoutSpec(ApiModel):
     )
 
 
-class StrengthSessionSet(ApiModel):
+class StrengthSessionSet(WriteSpec):
     """One completed set."""
 
     reps: int | None = Field(default=None, ge=0, le=999)
@@ -118,14 +129,22 @@ class StrengthSessionSet(ApiModel):
         description="Time under tension. Defaults to a few seconds per rep.",
     )
     rest_s: float | None = Field(
-        default=None, ge=0, le=86400, description="Rest taken after this set."
+        default=None,
+        ge=0,
+        le=86400,
+        description="Rest taken after this set. Left out: 60 s, and none after the last set.",
     )
 
 
-class StrengthSessionExercise(ApiModel):
+class StrengthSessionExercise(WriteSpec):
     category: str
     exercise_name: str = Field(
-        default="", description="Garmin's exercise name. Left empty, the category's generic one."
+        default="",
+        validation_alias=AliasChoices(*EXERCISE_NAME_KEYS),
+        description=(
+            'Garmin\'s exercise name, as find_exercise gives it under "exercise". '
+            "Left empty, the category's generic one."
+        ),
     )
     sets: list[StrengthSessionSet] = Field(min_length=1)
 
@@ -143,7 +162,7 @@ class StrengthSessionExercise(ApiModel):
         return self
 
 
-class StrengthSessionSpec(ApiModel):
+class StrengthSessionSpec(WriteSpec):
     """A completed strength session, to be written as an activity.
 
     This is the write Garmin's official developer programme has never offered:
@@ -154,7 +173,9 @@ class StrengthSessionSpec(ApiModel):
     name: str = Field(default="Strength Training", max_length=80)
     start_time: datetime = Field(description="When the session started. Needs a timezone.")
     exercises: list[StrengthSessionExercise] = Field(min_length=1)
-    notes: str | None = Field(default=None, max_length=1024)
+    notes: str | None = Field(
+        default=None, max_length=1024, description="Saved as the activity's description."
+    )
 
     @field_validator("start_time")
     @classmethod
@@ -194,7 +215,7 @@ StepKind = Literal["warmup", "interval", "recovery", "rest", "cooldown"]
 DISTANCE_UNITS = {"m": 1.0, "km": 1000.0, "mi": 1609.344, "yd": 0.9144}
 
 
-class Target(ApiModel):
+class Target(WriteSpec):
     """What to hold during a step. Give exactly one.
 
     Paces are "m:ss" strings: ``pace_per_km=["5:30", "5:00"]``. A range may
@@ -242,7 +263,7 @@ def _seconds(text: str) -> int:
     return minutes * 60 + seconds
 
 
-class EnduranceStep(ApiModel):
+class EnduranceStep(WriteSpec):
     """One step: ends after a time, a distance, or a press of the lap button."""
 
     kind: StepKind = "interval"
@@ -267,7 +288,7 @@ class EnduranceStep(ApiModel):
         return self.distance * DISTANCE_UNITS[self.distance_unit] if self.distance else None
 
 
-class EnduranceRepeat(ApiModel):
+class EnduranceRepeat(WriteSpec):
     repeat: int = Field(ge=2, le=99)
     steps: list[EnduranceStep] = Field(min_length=1)
 
@@ -285,7 +306,7 @@ StepOrRepeat = Annotated[
 ]
 
 
-class EnduranceWorkoutSpec(ApiModel):
+class EnduranceWorkoutSpec(WriteSpec):
     """A run, ride or pool swim to put on the Garmin calendar."""
 
     sport: Literal["running", "cycling", "swimming"]

@@ -120,18 +120,34 @@ def log_strength_session(
         if activity_id is not None:
             result["status"] = "created"
             result["activity_id"] = activity_id
-    if rename and activity_id:
-        from . import activities
-
-        try:
-            activities.set_name(activity_id, spec.name)
-            result["name"] = spec.name
-        except Exception as exc:  # noqa: BLE001 -- the upload itself succeeded
-            logger.warning("Uploaded %s but could not rename it: %s", activity_id, exc)
-            result["rename_failed"] = str(exc)
+    # Only a new activity is named and described. A duplicate's id is the
+    # activity already there, which this call must not change.
+    if activity_id and result.get("status") == "created":
+        _label(result, activity_id, spec, rename=rename)
 
     result["sets_uploaded"] = spec.total_sets
     return result
+
+
+def _label(
+    result: dict[str, Any], activity_id: int, spec: StrengthSessionSpec, *, rename: bool
+) -> None:
+    """Give a new activity the session's name and notes, which the file cannot carry."""
+    from . import activities
+
+    steps = [("name", spec.name if rename else None), ("description", spec.notes)]
+    for field, value in steps:
+        if not value:
+            continue
+        try:
+            if field == "name":
+                activities.set_name(activity_id, value)
+            else:
+                activities.set_description(activity_id, value)
+            result[field] = value
+        except Exception as exc:  # noqa: BLE001 -- the upload itself succeeded
+            logger.warning("Uploaded %s but could not set its %s: %s", activity_id, field, exc)
+            result["rename_failed" if field == "name" else "description_failed"] = str(exc)
 
 
 # How long to wait for Garmin to finish processing an accepted upload.

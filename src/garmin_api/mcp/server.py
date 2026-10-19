@@ -26,14 +26,21 @@ from ..services import activities as activities_service
 INSTRUCTIONS = """
 Read and write a Garmin Connect account.
 
-Two things worth knowing before writing anything:
+Before writing anything:
 
 * Exercises must be named with Garmin's own category and exercise_name pair,
-  for example BENCH_PRESS and BARBELL_BENCH_PRESS. Search the exercise
-  catalogue first; an unknown name is rejected.
-* A workout and a session are different. Creating a strength workout puts a
-  plan on the calendar to follow later. Logging a strength session records
-  something already done, and it appears in the history as an activity.
+  for example BENCH_PRESS and BARBELL_BENCH_PRESS. find_exercise gives them
+  (the variant under "exercise", which the write tools also accept); an
+  unknown name is rejected.
+* A workout and a session are different. A workout is a plan to follow
+  later: creating one saves it, and schedule_date puts it on the calendar. A
+  session is something already done: logging one adds an activity to the
+  history. Completed sessions are activities, not workouts.
+* A logged session may be shared automatically to Strava or another app the
+  account is connected to, where followers can see it, and deleting it from
+  Garmin does not delete it there. Say so before logging one.
+* To correct a logged session, use edit_activity_sets. Logging it again with
+  changed sets creates a second activity.
 
 If a call reports that Garmin is rate limiting the account, stop. Retrying
 can lock the account out for a day or more.
@@ -186,10 +193,11 @@ def _add_convenience_tools(mcp: FastMCP) -> None:
         )
     )
     def garmin_status() -> dict[str, Any]:
-        """Check whether this server can reach the Garmin account.
+        """Check whether this server holds a Garmin login.
 
         Call this first if anything fails. It reports whether tokens exist and
-        how old they are, without calling Garmin.
+        how old they are, without calling Garmin, so tokens Garmin has since
+        revoked still show as authenticated; any other call reveals that.
         """
         return {
             "version": __version__,
@@ -222,8 +230,10 @@ def _add_convenience_tools(mcp: FastMCP) -> None:
             open_world_hint=True,
         )
     )
-    def recent_strength_sessions(count: int = 5, include_sets: bool = True) -> list[dict[str, Any]]:
-        """Recent strength workouts, with their sets.
+    def recent_strength_sessions(
+        count: Annotated[int, Field(ge=1, le=25)] = 5, include_sets: bool = True
+    ) -> list[dict[str, Any]]:
+        """Recent completed strength sessions (activities), with their sets.
 
         One call instead of listing activities and then fetching each one's
         sets. Includes the total volume, which is the sum of reps times weight
@@ -272,7 +282,7 @@ def _add_convenience_tools(mcp: FastMCP) -> None:
 
         Covers the week ending on end_day, or today. Gives each day's steps,
         resting heart rate, sleep and training readiness, plus the activities
-        in that window.
+        in that window. A night's sleep belongs to the day it ended on.
         """
         # "Today" in the Garmin profile's timezone, not the machine's or UTC's:
         # after 8pm in New York, UTC is already tomorrow.

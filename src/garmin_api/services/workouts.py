@@ -111,13 +111,15 @@ def _schedule_new(summary: WorkoutSummary, day: date | None) -> None:
     if not day or not summary.workout_id:
         return
     try:
-        schedule(summary.workout_id, day)
+        entry = schedule(summary.workout_id, day)
     except GarminApiError as exc:
         exc.detail = (
             f"The workout was created as {summary.workout_id} but not scheduled; "
             f"schedule that one rather than creating it again. {exc.detail or ''}"
         ).strip()
         raise
+    summary.schedule_id = entry.schedule_id
+    summary.scheduled_on = entry.day
 
 
 def create_raw(workout_json: dict[str, Any]) -> WorkoutSummary:

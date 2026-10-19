@@ -147,7 +147,9 @@ def day(
 
     if "readiness" in parts:
         readiness = training_readiness(day_str)
-        morning = morning_readiness(readiness if isinstance(readiness, list) else [])
+        # A list of snapshots, or, on some accounts, a single snapshot object.
+        snapshots = readiness if isinstance(readiness, list) else [readiness] if readiness else []
+        morning = morning_readiness(snapshots)
         if morning is not None:
             summary.training_readiness = morning.get("score")
 
@@ -155,7 +157,10 @@ def day(
         weigh_ins = _safe("get_daily_weigh_ins", day_str) or {}
         rows = weigh_ins.get("dateWeightList") if isinstance(weigh_ins, dict) else None
         if rows:
-            summary.weight = WeighIn.from_garmin(rows[0], include_raw=include_raw)
+            # The day's last weigh-in, as the weight trend reports it; nothing
+            # says what order Garmin lists them in.
+            latest = max(rows, key=lambda r: r.get("timestampGMT") or r.get("date") or 0)
+            summary.weight = WeighIn.from_garmin(latest, include_raw=include_raw)
 
     return summary
 
@@ -187,8 +192,9 @@ def stress_summary(day: date | str, *, include_samples: bool = False) -> StressS
 def steps_summary(day: date | str, *, include_buckets: bool = False) -> StepsSummary:
     day_str = as_date_str(day)
     payload = steps(day_str)
-    if payload is None:
-        # Garmin did not answer, which is not the same as no steps.
+    if not payload:
+        # No answer, or an empty one (the library turns both into [] or {}):
+        # not the same as no steps, since a worn day has its quarter-hours.
         return StepsSummary(day=date.fromisoformat(day_str), total=None)
     return StepsSummary.from_garmin(
         date.fromisoformat(day_str), payload, include_buckets=include_buckets

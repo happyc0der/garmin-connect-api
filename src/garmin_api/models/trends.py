@@ -138,6 +138,9 @@ def summarise(points: list[Point], daily: list[Point]) -> dict[str, Any]:
         "change": round(last.value - first.value, 1),
     }
     if len(points) >= 2:
+        # Over weeks or months, the change is the movement of the averages:
+        # two single days at either end say little about a trend.
         summary["first_period_average"] = points[0].value
         summary["last_period_average"] = points[-1].value
+        summary["change"] = round(points[-1].value - points[0].value, 1)
     return summary

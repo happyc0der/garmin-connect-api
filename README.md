@@ -133,7 +133,7 @@ into weeks:
     "max": 61.0,
     "first_period_average": 57.3,
     "last_period_average": 51.6,
-    "change": -6.0
+    "change": -5.7
   }
 }
 ```
@@ -148,8 +148,11 @@ into weeks:
   retries a login, and a rate limit stops every call path rather than being retried. If you see
   one, wait.
 - **Exercises need Garmin's own names**, such as `BENCH_PRESS` / `BARBELL_BENCH_PRESS`. Every write
-  checks them against the catalogue first and suggests near misses, so a typo fails with a useful
-  message rather than Garmin's bare 400. Common gym names work in search: "rdl", "ohp", "pull ups".
+  but the raw workout DTO checks them against the catalogue first and suggests near misses, so a
+  typo fails with a useful message rather than Garmin's bare 400. Common gym names work in search:
+  "rdl", "ohp", "pull ups", "bench presses".
+- **To correct a logged session, edit its sets.** Logging it again with a set changed creates a
+  second activity; logging the identical session again is reported as a duplicate.
 - **Sessions and body-composition readings need a timezone offset**, or a 7am reading would land
   hours out. They are refused without one.
 
@@ -212,7 +215,8 @@ something is not mapped.
 tools are generated from these routes, so the two cannot drift apart. Because it can write to your
 account, the service refuses writes from web pages open in your browser and requests naming any
 host but `localhost`, which defeats DNS rebinding. Binding beyond localhost requires
-`GARMIN_API_KEY`. `garmin mcp --http` serves the MCP tools over HTTP behind the same guard.
+`GARMIN_API_KEY`, and the host name clients will use must be listed in `GARMIN_API_HOSTS`.
+`garmin mcp --http` serves the MCP tools over HTTP behind the same guard.
 
 ## Configuration
 
@@ -220,7 +224,7 @@ host but `localhost`, which defeats DNS rebinding. Binding beyond localhost requ
 | --- | --- |
 | `GARMINTOKENS` | Where tokens are stored. Defaults to `~/.garmin-api/default`. |
 | `GARMIN_API_KEY` | Required to bind the HTTP service beyond localhost. |
-| `GARMIN_API_HOSTS` | Extra host names the HTTP service answers to, comma-separated. |
+| `GARMIN_API_HOSTS` | Extra host names the HTTP and MCP servers answer to, comma-separated. Needed for any name but localhost. |
 
 ## Development
 

@@ -23,16 +23,20 @@ router = APIRouter(prefix="/sessions", tags=["sessions"])
 
 @router.post("/strength", operation_id="log_strength_session")
 def log_strength(spec: StrengthSessionSpec) -> dict[str, Any]:
-    """Log a completed strength workout to Garmin Connect.
+    """Log a completed strength session to Garmin Connect as an activity.
 
     Takes the session as it happened, exercise by exercise with the reps and
     weight of every set, encodes it as a FIT activity file and uploads it. It
     appears in Garmin Connect as a Strength Training activity with the sets
-    intact.
+    intact, named after the session, with its notes as the description.
+
+    If the account shares to Strava or another app, the activity may be posted
+    there too, publicly, and deleting it from Garmin does not delete it there.
 
     Name exercises with Garmin's category and exercise_name pair; search the
-    exercise catalogue first if unsure. Uploading the same session twice is
-    reported as a duplicate rather than creating a second activity.
+    exercise catalogue first if unsure. Logging the identical session again is
+    reported as a duplicate and changes nothing; logging it with any set
+    changed creates a second activity, so correct one with edit_activity_sets.
     """
     return _refuse_rejected(service.log_strength_session(spec))
 
