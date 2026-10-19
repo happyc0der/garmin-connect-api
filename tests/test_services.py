@@ -611,3 +611,20 @@ class TestAcceptedUploads:
         assert result["status"] == "accepted"
         assert result["activity_id"] is None
         assert result["upload_id"] == 991
+
+
+def test_working_sets_are_numbered_in_order_and_rests_are_not() -> None:
+    """messageIndex starts at 0 and counts rests: it once gave two rows number 1."""
+    from garmin_api.models.activities import ActivitySets
+
+    rows = [
+        {"messageIndex": 0, "setType": "ACTIVE", "repetitionCount": 10, "exercises": []},
+        {"messageIndex": 1, "setType": "REST", "duration": 90.0, "exercises": []},
+        {"messageIndex": 2, "setType": "ACTIVE", "repetitionCount": 8, "exercises": []},
+        {"messageIndex": 3, "setType": "REST", "duration": 90.0, "exercises": []},
+        {"messageIndex": 4, "setType": "ACTIVE", "repetitionCount": 6, "exercises": []},
+    ]
+    parsed = ActivitySets.from_garmin(1, {"exerciseSets": rows})
+    assert [s.set_number for s in parsed.sets] == [1, None, 2, None, 3]
+    assert [s.message_index for s in parsed.sets] == [0, 1, 2, 3, 4]
+    assert [s.set_number for s in parsed.working_sets] == [1, 2, 3]

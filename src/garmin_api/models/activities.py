@@ -120,7 +120,11 @@ class StrengthSet(ApiModel):
     caller wants, so services filter them by default.
     """
 
-    set_number: int | None = None
+    set_number: int | None = Field(
+        default=None,
+        description="Working sets numbered 1, 2, 3 in order; rests have none. Edits use this.",
+    )
+    message_index: int | None = Field(default=None, description="Garmin's own index for the row.")
     set_type: str | None = None
     exercise_category: str | None = Field(default=None, description='e.g. "BENCH_PRESS".')
     exercise_name: str | None = Field(default=None, description='e.g. "BARBELL_BENCH_PRESS".')
@@ -143,7 +147,8 @@ class StrengthSet(ApiModel):
         exercises = payload.get("exercises") or []
         chosen = exercises[0] if exercises else {}
         return cls(
-            set_number=first(payload, "setNumber", "messageIndex") or index,
+            set_number=index,
+            message_index=payload.get("messageIndex"),
             set_type=first(payload, "setType"),
             exercise_category=chosen.get("category"),
             exercise_name=chosen.get("name"),
@@ -182,11 +187,18 @@ class ActivitySets(ApiModel):
     def from_garmin(
         cls, activity_id: int, payload: dict[str, Any], *, include_raw: bool = False
     ) -> ActivitySets:
-        rows = payload.get("exerciseSets") or []
-        return cls(
-            activity_id=activity_id,
-            sets=[
-                StrengthSet.from_garmin(row, index=i + 1, include_raw=include_raw)
-                for i, row in enumerate(rows)
-            ],
-        )
+        # Numbered by position among working sets. Garmin's messageIndex
+        # starts at 0 and counts rests too, so using it gave the first two
+        # rows the same number and gave rests numbers of their own.
+        sets: list[StrengthSet] = []
+        number = 0
+        for row in payload.get("exerciseSets") or []:
+            rest = str(row.get("setType") or "").upper() == "REST"
+            if not rest:
+                number += 1
+            sets.append(
+                StrengthSet.from_garmin(
+                    row, index=None if rest else number, include_raw=include_raw
+                )
+            )
+        return cls(activity_id=activity_id, sets=sets)
