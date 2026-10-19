@@ -84,3 +84,24 @@ def sample_session() -> StrengthSessionSpec:
 
 def load_fixture(name: str) -> Any:
     return json.loads((FIXTURES / name).read_text())
+
+
+@pytest.fixture
+def non_strength_fit() -> bytes:
+    """A valid FIT file with no set messages, as a run or ride would be.
+
+    A fixture rather than a function imported from a test module: importing
+    ``tests.something`` works only when the repo root is on sys.path, which
+    ``python -m pytest`` arranges and plain ``pytest`` does not.
+    """
+    from fit_tool.fit_file_builder import FitFileBuilder
+    from fit_tool.profile.messages.file_id_message import FileIdMessage
+    from fit_tool.profile.profile_type import FileType
+
+    builder = FitFileBuilder(auto_define=True)
+    message = FileIdMessage()
+    message.type = FileType.ACTIVITY
+    message.serial_number = 1
+    message.time_created = round(datetime(2026, 9, 21, tzinfo=UTC).timestamp() * 1000)
+    builder.add(message)
+    return bytes(builder.build().to_bytes())

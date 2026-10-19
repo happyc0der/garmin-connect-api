@@ -65,11 +65,9 @@ def test_cli_reports_an_invalid_spec_plainly(tmp_path: Path) -> None:
     assert "Traceback" not in result.output
 
 
-def test_cli_reports_a_non_strength_file_plainly(tmp_path: Path) -> None:
-    from tests.test_fit_codec import encode_minimal_non_strength
-
+def test_cli_reports_a_non_strength_file_plainly(tmp_path: Path, non_strength_fit: bytes) -> None:
     path = tmp_path / "run.fit"
-    path.write_bytes(encode_minimal_non_strength())
+    path.write_bytes(non_strength_fit)
     result = runner.invoke(app, ["decode-fit", str(path)])
     assert result.exit_code == 1
     assert "No strength sets" in result.output

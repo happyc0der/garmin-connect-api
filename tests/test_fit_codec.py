@@ -101,24 +101,9 @@ def test_same_serial_encodes_identically(sample_session: StrengthSessionSpec) ->
     assert first == second
 
 
-def test_decoding_a_file_with_no_sets_says_so() -> None:
+def test_decoding_a_file_with_no_sets_says_so(non_strength_fit: bytes) -> None:
     with pytest.raises(InvalidRequest, match="No strength sets"):
-        decode_strength_session(encode_minimal_non_strength())
-
-
-def encode_minimal_non_strength() -> bytes:
-    """A valid FIT file with no set messages, as a run or ride would be."""
-    from fit_tool.fit_file_builder import FitFileBuilder
-    from fit_tool.profile.messages.file_id_message import FileIdMessage
-    from fit_tool.profile.profile_type import FileType
-
-    builder = FitFileBuilder(auto_define=True)
-    message = FileIdMessage()
-    message.type = FileType.ACTIVITY
-    message.serial_number = 1
-    message.time_created = round(datetime(2026, 9, 21, tzinfo=UTC).timestamp() * 1000)
-    builder.add(message)
-    return bytes(builder.build().to_bytes())
+        decode_strength_session(non_strength_fit)
 
 
 class TestExerciseMapping:

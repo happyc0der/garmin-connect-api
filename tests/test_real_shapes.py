@@ -246,11 +246,9 @@ class TestBodyCompositionFit:
         with pytest.raises(ValueError, match="timezone"):
             BodyCompositionSpec(timestamp=datetime(2026, 10, 19, 7, 30), weight_kg=72.4)
 
-    def test_a_file_with_no_weigh_ins_says_so(self) -> None:
-        from tests.test_fit_codec import encode_minimal_non_strength
-
+    def test_a_file_with_no_weigh_ins_says_so(self, non_strength_fit: bytes) -> None:
         with pytest.raises(InvalidRequest, match="No weigh-ins"):
-            decode_body_composition(encode_minimal_non_strength())
+            decode_body_composition(non_strength_fit)
 
     def test_upload_goes_through_the_upload_service(self, fake_garmin: dict[str, Any]) -> None:
         fake_garmin["responses"]["upload_activity"] = {
