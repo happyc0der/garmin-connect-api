@@ -294,7 +294,7 @@ def mcp(http: bool = typer.Option(False, help="Serve over HTTP instead of stdio.
     from .mcp import create_mcp
 
     server = create_mcp()
-    server.run(transport="http" if http else "stdio")
+    server.run(transport="http" if http else "stdio", show_banner=False)
 
 
 @app.command()

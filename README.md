@@ -169,9 +169,10 @@ status of `duplicate` rather than as a second activity.
 uv run pytest
 ```
 
-67 tests, no network and no account needed. They cover the models against real Garmin payload
+84 tests, no network and no account needed. They cover the models against real Garmin payload
 shapes, the FIT codec's round trip, the whole 1,527-entry exercise catalogue against the FIT
-profile, the HTTP routes, and the generated MCP tool list.
+profile, the HTTP routes, the generated MCP tool list, and every tool's output against its own
+advertised schema, which strict MCP clients enforce.
 
 Against a real account:
 

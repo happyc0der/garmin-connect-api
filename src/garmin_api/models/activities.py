@@ -40,11 +40,13 @@ class ActivitySummary(ApiModel):
     name: str | None = None
     activity_type: ActivityType | None = None
     start_time: datetime | None = Field(default=None, description="Start instant, UTC.")
-    start_time_local: datetime | None = Field(
+    start_time_local: str | None = Field(
         default=None,
+        pattern=r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$",
+        examples=["2026-08-30T18:15:00"],
         description=(
-            "Wall-clock start where the activity happened. Deliberately has no "
-            "timezone: Garmin does not say which zone it is, only the time."
+            "Wall-clock start where the activity happened, as YYYY-MM-DDTHH:MM:SS. "
+            "Deliberately has no timezone: Garmin gives the time, not the zone."
         ),
     )
     duration_s: float | None = None

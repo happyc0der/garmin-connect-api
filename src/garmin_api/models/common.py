@@ -49,15 +49,17 @@ def parse_dt(value: Any) -> datetime | None:
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
 
-def parse_local(value: Any) -> datetime | None:
-    """Parse a wall-clock time and leave it without a timezone.
+def parse_local(value: Any) -> str | None:
+    """A wall-clock time, as ``YYYY-MM-DDTHH:MM:SS`` with no offset.
 
     Garmin's ``*Local`` fields are the time on the watch where the activity
-    happened, with no offset given. Tagging one as UTC would state a falsehood
-    -- 19:09 in New York is not 19:09 UTC -- so it stays naive.
+    happened, with no zone given. Tagging one as UTC would state a falsehood
+    -- 19:09 in New York is not 19:09 UTC -- and a datetime without an offset
+    is not a valid JSON Schema ``date-time``, which strict MCP clients reject.
+    So it travels as what it is: a plain local timestamp string.
     """
     parsed = parse_dt(value)
-    return parsed.replace(tzinfo=None) if parsed else None
+    return parsed.replace(tzinfo=None).isoformat(timespec="seconds") if parsed else None
 
 
 def parse_date(value: Any) -> date | None:

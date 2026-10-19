@@ -399,8 +399,7 @@ class TestRealDataMappings:
     def test_local_start_time_carries_no_false_timezone(self, fake_garmin: dict[str, Any]) -> None:
         fake_garmin["responses"]["get_activities"] = [ACTIVITY_ROW]
         only = activities.list_activities()[0]
-        assert only.start_time_local == datetime(2026, 9, 21, 7, 0)
-        assert only.start_time_local.tzinfo is None
+        assert only.start_time_local == "2026-09-21T07:00:00"
         assert only.start_time is not None and only.start_time.tzinfo is not None
 
     def test_vigorous_minutes_are_kept(self, fake_garmin: dict[str, Any]) -> None:
