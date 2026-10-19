@@ -28,6 +28,9 @@ wrong answers to ordinary questions.
   CLI; it is an error everywhere. A failed connect is no longer repeated by every part of a day
   summary, and a rate-limit note is no longer replaced by advice to make another call.
 - Resting heart rate trends are fetched a year at a time, as the library advises.
+- A last check of these changes: a weigh-in given in UTC is refused while the account's timezone
+  is unknown, since its day cannot be told; odd timezone names and Origin schemes are handled; a
+  new login clears the short holds after a rate limit or an unreachable Garmin.
 
 ## 0.2.4 (2026-10-19)
 
