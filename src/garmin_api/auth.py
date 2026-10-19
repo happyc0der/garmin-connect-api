@@ -27,6 +27,7 @@ from garminconnect import Garmin
 
 from .errors import (
     Duplicate,
+    GarminApiError,
     GarminUnavailable,
     InvalidRequest,
     NotAuthenticated,
@@ -50,7 +51,7 @@ def token_dir() -> Path:
     return Path(env).expanduser() if env else DEFAULT_TOKEN_DIR
 
 
-def _token_files() -> list[Path]:
+def _token_files(directory: Path | None = None) -> list[Path]:
     """This package's token file, if present.
 
     python-garminconnect 0.3 keeps everything in one ``garmin_tokens.json``,
@@ -62,7 +63,7 @@ def _token_files() -> list[Path]:
     from garminconnect.client import token_file_path
 
     try:
-        current = token_file_path(str(token_dir()))
+        current = token_file_path(str(directory or token_dir()))
     except ValueError:
         return []
     return [current] if current.is_file() else []
@@ -164,6 +165,11 @@ def translate(exc: Exception) -> Exception:
             return translate(GarminConnectAuthenticationError(str(exc)))
         if status == 404:
             return NotFound("Garmin has no such item.", detail=str(exc))
+        if status == 409:
+            # The upload service's answer to a file it already has; the
+            # library's import path says so in words, its upload path only
+            # with the status.
+            return Duplicate("Garmin already has this.", detail=str(exc))
         if status is not None and 400 <= status < 500:
             return InvalidRequest(f"Garmin rejected the request ({status}).", detail=str(exc))
         if status is not None and status >= 500:
@@ -171,6 +177,17 @@ def translate(exc: Exception) -> Exception:
                 f"Garmin answered with a server error ({status}).",
                 detail="The library already retried. Try again later.",
             )
+        return GarminUnavailable("Could not reach Garmin Connect.", detail=str(exc))
+    import requests
+
+    if isinstance(exc, requests.Timeout):
+        # Writes reach the transport without the library's error mapper, so
+        # the network's own errors arrive here unwrapped.
+        return GarminUnavailable(
+            "Garmin did not answer in time.",
+            detail="A write may or may not have been applied; check before repeating it.",
+        )
+    if isinstance(exc, requests.RequestException):
         return GarminUnavailable("Could not reach Garmin Connect.", detail=str(exc))
     if isinstance(exc, (ValueError, TypeError)):
         # Raised by the library's own input checks before any request is made.
@@ -205,7 +222,7 @@ class Session:
         with self._lock:
             if self._client is not None:
                 return self._client
-            if not has_tokens():
+            if not _token_files(self._tokens):
                 raise NotAuthenticated(
                     "No Garmin tokens found.",
                     detail=f"Run `garmin login` first. Tokens are stored in {self._tokens}.",
@@ -245,10 +262,18 @@ class Session:
 
 
 def _is_unauthorized(exc: Exception) -> bool:
-    response = getattr(exc, "response", None)
-    if response is not None and getattr(response, "status_code", None) == 401:
-        return True
-    return "401" in str(exc) and "unauthor" in str(exc).lower()
+    """Whether Garmin refused the client's token, as opposed to anything else.
+
+    A read's 401 comes back from the library's error mapper as an
+    authentication error carrying the status only in its cause, and a
+    write's as a connection error with the response attached; both count.
+    This package's own errors, such as missing tokens, never do.
+    """
+    from garminconnect import GarminConnectAuthenticationError
+
+    if isinstance(exc, GarminApiError):
+        return False
+    return isinstance(exc, GarminConnectAuthenticationError) or _status_of(exc) == 401
 
 
 _session: Session | None = None

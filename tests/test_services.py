@@ -242,6 +242,14 @@ class TestWorkouts:
 
 
 class TestUploads:
+    @pytest.fixture(autouse=True)
+    def nothing_there_yet(self, fake_garmin: dict[str, Any], monkeypatch) -> None:
+        """Before uploading, the session looks for activities already at its start."""
+        monkeypatch.setattr(activities, "_types_cache", None)
+        fake_garmin["responses"].update(
+            {"get_activity_types": TestAcceptedUploads.TYPES, "connectapi": []}
+        )
+
     def test_a_successful_upload_reports_the_new_activity(
         self, fake_garmin, sample_session
     ) -> None:
@@ -572,27 +580,86 @@ class TestAcceptedUploads:
         monkeypatch.setattr(uploads, "FIND_INTERVAL_S", 0.0)
         monkeypatch.setattr(activities, "_types_cache", None)
 
-    def test_the_new_activity_is_found_by_its_start_and_renamed(
+    @staticmethod
+    def row(activity_id: int, start: str) -> dict[str, Any]:
+        return {
+            "activityId": activity_id,
+            "activityType": {"typeKey": "strength_training"},
+            "startTimeGMT": start,
+        }
+
+    def at(self, activity_id: int) -> dict[str, Any]:
+        """A strength activity starting exactly when the sample session does."""
+        return self.row(activity_id, "2026-09-21 07:00:00")
+
+    @staticmethod
+    def listing(*pages: Any) -> Any:
+        """Garmin's activity list, before the upload and then after it."""
+        answers = list(pages)
+
+        def answer(*_: Any, **__: Any) -> Any:
+            page = answers.pop(0) if len(answers) > 1 else answers[0]
+            if isinstance(page, Exception):
+                raise page
+            return page
+
+        return answer
+
+    def test_an_activity_already_at_that_start_is_not_claimed(
         self, fake_garmin: dict[str, Any], sample_session
     ) -> None:
-        start = sample_session.start_time.strftime("%Y-%m-%d %H:%M:%S")
+        """The watch's own recording, or an earlier log, must not be renamed as the upload."""
         renamed: list[Any] = []
         fake_garmin["responses"].update(
             {
                 "upload_activity": self.ACCEPTED,
                 "get_activity_types": self.TYPES,
-                "connectapi": [
-                    {
-                        "activityId": 5,
-                        "activityType": {"typeKey": "strength_training"},
-                        "startTimeGMT": "2026-09-21 18:00:00",
-                    },
-                    {
-                        "activityId": 6,
-                        "activityType": {"typeKey": "strength_training"},
-                        "startTimeGMT": start,
-                    },
-                ],
+                "connectapi": self.listing([self.at(111)]),
+                "set_activity_name": lambda *a: renamed.append(a) or {},
+            }
+        )
+        result = uploads.log_strength_session(sample_session)
+        assert result["status"] == "accepted"
+        assert result["activity_id"] is None
+        assert renamed == []
+
+    def test_the_upload_is_found_beside_one_already_there(
+        self, fake_garmin: dict[str, Any], sample_session
+    ) -> None:
+        fake_garmin["responses"].update(
+            {
+                "upload_activity": self.ACCEPTED,
+                "get_activity_types": self.TYPES,
+                "connectapi": self.listing([self.at(111)], [self.at(111), self.at(112)]),
+                "set_activity_name": {},
+            }
+        )
+        assert uploads.log_strength_session(sample_session)["activity_id"] == 112
+
+    def test_a_failed_search_after_the_upload_still_reports_the_upload(
+        self, fake_garmin: dict[str, Any], sample_session
+    ) -> None:
+        fake_garmin["responses"].update(
+            {
+                "upload_activity": self.ACCEPTED,
+                "get_activity_types": self.TYPES,
+                "connectapi": self.listing([], TimeoutError("read timed out")),
+            }
+        )
+        result = uploads.log_strength_session(sample_session)
+        assert result["status"] == "accepted"
+        assert result["upload_id"] == 991
+        assert "timed out" in result["find_failed"]
+
+    def test_the_new_activity_is_found_by_its_start_and_renamed(
+        self, fake_garmin: dict[str, Any], sample_session
+    ) -> None:
+        renamed: list[Any] = []
+        fake_garmin["responses"].update(
+            {
+                "upload_activity": self.ACCEPTED,
+                "get_activity_types": self.TYPES,
+                "connectapi": self.listing([], [self.row(5, "2026-09-21 18:00:00"), self.at(6)]),
                 "set_activity_name": lambda *a: renamed.append(a) or {},
             }
         )

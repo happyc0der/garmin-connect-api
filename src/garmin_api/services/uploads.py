@@ -48,10 +48,33 @@ def upload_file(path: str | Path) -> dict[str, Any]:
     try:
         response = auth.call("upload_activity", str(source))
     except Duplicate as exc:
-        # The library raises on Garmin's 409 rather than returning it, and
-        # gives no id for the activity already there.
-        return {"status": "duplicate", "activity_id": None, "messages": [exc.detail or exc.message]}
+        # The library raises on Garmin's 409 rather than returning it. The
+        # reply it raised from still names the activity already there.
+        return {
+            "status": "duplicate",
+            "activity_id": _existing_activity_id(exc),
+            "messages": [exc.detail or exc.message],
+        }
     return _interpret_upload(response)
+
+
+def _existing_activity_id(exc: BaseException) -> int | None:
+    """The id in a 409 reply's ``detailedImportResult``, found through the cause chain."""
+    seen: BaseException | None = exc
+    for _ in range(5):
+        if seen is None:
+            return None
+        response = getattr(seen, "response", None)
+        if response is not None and hasattr(response, "json"):
+            try:
+                failures = (response.json().get("detailedImportResult") or {}).get("failures")
+                found = (failures or [{}])[0].get("internalId")
+            except Exception:  # noqa: BLE001 -- a body that is not the expected JSON
+                found = None
+            if isinstance(found, int):
+                return found
+        seen = seen.__cause__ or seen.__context__
+    return None
 
 
 def log_strength_session(
@@ -71,6 +94,9 @@ def log_strength_session(
         catalogue.validate(exercise.category, exercise.exercise_name)
 
     data = encode_strength_session(spec, serial=serial)
+    # Anything already starting at this instant, such as the watch's own
+    # recording or an earlier log of the session, is not the new upload.
+    already_there = set(_ids_starting_at(spec))
 
     with tempfile.TemporaryDirectory() as tmp:
         # The filename becomes the activity's name on Garmin's side, so it is
@@ -86,7 +112,11 @@ def log_strength_session(
         # answering with neither a success nor a failure. Found live: the
         # activity appeared moments later. The session's own start time is
         # known exactly, so the new activity is found by it.
-        activity_id = find_uploaded_session(spec)
+        try:
+            activity_id = find_uploaded_session(spec, exclude=already_there)
+        except Exception as exc:  # noqa: BLE001 -- the upload itself succeeded
+            logger.warning("Uploaded, but could not look the activity up: %s", exc)
+            result["find_failed"] = str(exc)
         if activity_id is not None:
             result["status"] = "created"
             result["activity_id"] = activity_id
@@ -110,35 +140,50 @@ FIND_INTERVAL_S = 2.0
 
 
 def find_uploaded_session(
-    spec: StrengthSessionSpec, *, attempts: int | None = None, interval_s: float | None = None
+    spec: StrengthSessionSpec,
+    *,
+    attempts: int | None = None,
+    interval_s: float | None = None,
+    exclude: set[int] | None = None,
 ) -> int | None:
     """The id of the strength activity that starts when ``spec`` does, if any.
 
     Matches on the start instant to the second, which the encoder writes
     exactly, so an unrelated workout the same day is never mistaken for it.
+    Ids in ``exclude``, the ones there before an upload, are passed over.
     """
     import time
-    from datetime import timedelta
-
-    from . import activities
 
     # Read at call time, not bound as defaults, so the settings can be changed.
     attempts = FIND_ATTEMPTS if attempts is None else attempts
     interval_s = FIND_INTERVAL_S if interval_s is None else interval_s
-    start = spec.start_time
     for attempt in range(attempts):
-        rows = activities.list_activities(
-            activity_type=activities.STRENGTH,
-            start_date=(start - timedelta(days=1)).date(),
-            end_date=(start + timedelta(days=1)).date(),
-            limit=50,
-        )
-        for row in rows:
-            if row.start_time and abs((row.start_time - start).total_seconds()) <= 1:
-                return row.activity_id
+        for activity_id in _ids_starting_at(spec):
+            if activity_id not in (exclude or set()):
+                return activity_id
         if attempt < attempts - 1:
             time.sleep(interval_s)
     return None
+
+
+def _ids_starting_at(spec: StrengthSessionSpec) -> list[int]:
+    """Strength activities starting within a second of ``spec``."""
+    from datetime import timedelta
+
+    from . import activities
+
+    start = spec.start_time
+    rows = activities.list_activities(
+        activity_type=activities.STRENGTH,
+        start_date=(start - timedelta(days=1)).date(),
+        end_date=(start + timedelta(days=1)).date(),
+        limit=50,
+    )
+    return [
+        row.activity_id
+        for row in rows
+        if row.start_time and abs((row.start_time - start).total_seconds()) <= 1
+    ]
 
 
 def _interpret_upload(response: Any) -> dict[str, Any]:
