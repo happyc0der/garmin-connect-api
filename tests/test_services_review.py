@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -219,3 +219,46 @@ def test_a_vo2max_month_overlapping_the_start_is_kept(fake_garmin: dict[str, Any
 def test_daily_metrics_still_count_days(fake_garmin: dict[str, Any]) -> None:
     fake_garmin["responses"]["get_training_readiness_range"] = READINESS
     assert trends.trend("readiness", "2026-01-01", "2026-01-01").summary["days_with_data"] == 1
+
+
+GARMIN_LIMITS = {
+    "get_daily_stress_stats": 28,
+    "get_daily_body_battery_stats": 28,
+    "get_hrv_data_range": 366,
+    "get_training_readiness_range": 28,
+}
+
+
+def _strict(name: str, calls: list[tuple[date, date]]) -> Any:
+    """An endpoint that refuses ranges over its limit, as Garmin does."""
+
+    def answer(start: str, end: str) -> Any:
+        s, e = date.fromisoformat(start), date.fromisoformat(end)
+        if (e - s).days + 1 > GARMIN_LIMITS[name]:
+            raise InvalidRequest("Garmin rejected the request (400).")
+        calls.append((s, e))
+        return {"hrvSummaries": []} if name == "get_hrv_data_range" else []
+
+    return answer
+
+
+@pytest.mark.parametrize(
+    ("metric", "endpoint"),
+    [
+        ("stress", "get_daily_stress_stats"),
+        ("body_battery", "get_daily_body_battery_stats"),
+        ("hrv", "get_hrv_data_range"),
+        ("readiness", "get_training_readiness_range"),
+    ],
+)
+@pytest.mark.parametrize("days", [1, 28, 29, 62, 366, 731])
+def test_long_ranges_are_fetched_within_garmins_limits(
+    fake_garmin: dict[str, Any], metric: str, endpoint: str, days: int
+) -> None:
+    calls: list[tuple[date, date]] = []
+    fake_garmin["responses"][endpoint] = _strict(endpoint, calls)
+    start = date(2024, 10, 20)
+    end = start + timedelta(days=days - 1)
+    trends.trend(metric, start, end)
+    covered = [s + timedelta(days=i) for s, e in calls for i in range((e - s).days + 1)]
+    assert covered == [start + timedelta(days=i) for i in range(days)]
