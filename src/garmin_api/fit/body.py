@@ -89,18 +89,18 @@ def encode_body_composition(spec: BodyCompositionSpec, *, serial: int | None = N
 
 def decode_body_composition(data: bytes) -> list[BodyCompositionSpec]:
     """Every weigh-in in a weight-scale FIT file."""
-    from .decode import _unwrap, parse_fit
+    from .decode import _unwrap, field_value, parse_fit
 
     fit = parse_fit(_unwrap(data))
     found: list[BodyCompositionSpec] = []
     for record in fit.records:
         message = record.message
-        if not isinstance(message, WeightScaleMessage) or message.weight is None:
+        if not isinstance(message, WeightScaleMessage) or field_value(message, "weight") is None:
             continue
         values = {
-            spec_field: getattr(message, fit_field)
+            spec_field: field_value(message, fit_field)
             for spec_field, fit_field in FIELDS.items()
-            if getattr(message, fit_field) is not None
+            if field_value(message, fit_field) is not None
         }
         values["timestamp"] = datetime.fromtimestamp(message.timestamp / 1000, tz=UTC)
         for key, value in values.items():

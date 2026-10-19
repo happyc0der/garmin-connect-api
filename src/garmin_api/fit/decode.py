@@ -69,6 +69,22 @@ def _dt(value: Any) -> datetime | None:
     return datetime.fromtimestamp(float(value) / 1000.0, tz=UTC)
 
 
+def field_value(message: Any, name: str) -> Any:
+    """A field's value, or None where the file holds FIT's "no value" marker.
+
+    fit-tool decodes that marker like any other number. A watch writes it for
+    the weight of a bodyweight set and the reps of a timed one, which would
+    otherwise read as 4,095.94 kg and 65,535 reps.
+    """
+    field = message.get_field_by_name(name)
+    if field is None or not field.encoded_values:
+        return None
+    raw = field.encoded_values[0]
+    if raw is None or raw == field.base_type.invalid_raw_value():
+        return None
+    return getattr(message, name)
+
+
 def decode_strength_session(data: bytes, *, name: str = "Strength Training") -> StrengthSessionSpec:
     """Decode FIT bytes into a strength session.
 
@@ -77,16 +93,23 @@ def decode_strength_session(data: bytes, *, name: str = "Strength Training") -> 
     undoing exactly what the encoder did.
     """
     fit = parse_fit(_unwrap(data))
+    messages = [record.message for record in fit.records]
 
-    start: datetime | None = None
+    # The session message comes after the sets, in Garmin's files and in ours,
+    # and its start is the session's own; the first set may begin later.
+    start = next(
+        (
+            _dt(field_value(m, "start_time"))
+            for m in messages
+            if isinstance(m, SessionMessage) and field_value(m, "start_time") is not None
+        ),
+        None,
+    )
     exercises: list[StrengthSessionExercise] = []
     last_working: StrengthSessionSet | None = None
+    awaiting_rest = False
 
-    for record in fit.records:
-        message = record.message
-        if isinstance(message, SessionMessage) and start is None:
-            start = _dt(message.start_time)
-            continue
+    for message in messages:
         if not isinstance(message, SetMessage):
             continue
 
@@ -97,30 +120,42 @@ def decode_strength_session(data: bytes, *, name: str = "Strength Training") -> 
 
         if value == SetType.REST.value:
             # A rest belongs to the set before it.
-            if last_working is not None and message.duration:
-                last_working.rest_s = float(message.duration)
+            duration = field_value(message, "duration")
+            if last_working is not None and duration:
+                last_working.rest_s = float(duration)
+            awaiting_rest = False
             continue
 
-        category_raw = message.category
-        category_value = _first_value(category_raw)
+        category_value = _first_value(message.category)
         subtype_value = _first_value(message.category_subtype)
-        if category_value is None:
+        if category_value is None or category_value == 0xFFFF:
             continue
+        if subtype_value == 0xFFFF:
+            subtype_value = None
+
+        if last_working is not None and awaiting_rest:
+            # Straight into the next set: no rest, which is not the same as
+            # an unrecorded one, and re-encoding must not invent one.
+            last_working.rest_s = 0.0
 
         category = fx.category_name(int(category_value)) or "UNKNOWN"
         exercise_name = fx.exercise_name(int(category_value), subtype_value) or ""
 
+        reps = field_value(message, "repetitions")
+        weight = field_value(message, "weight")
+        duration = field_value(message, "duration")
         entry = StrengthSessionSet(
-            reps=int(message.repetitions) if message.repetitions is not None else None,
-            weight_kg=float(message.weight) if message.weight is not None else None,
-            duration_s=float(message.duration) if message.duration is not None else None,
+            reps=int(reps) if reps is not None else None,
+            weight_kg=float(weight) if weight is not None else None,
+            duration_s=float(duration) if duration is not None else None,
         )
         last_working = entry
+        awaiting_rest = True
 
         if (
             exercises
             and exercises[-1].category == category
-            and exercises[-1].exercise_name == exercise_name
+            and exercises[-1].exercise_name == (exercise_name or category)
         ):
             exercises[-1].sets.append(entry)
         else:
@@ -131,7 +166,7 @@ def decode_strength_session(data: bytes, *, name: str = "Strength Training") -> 
             )
 
         if start is None:
-            start = _dt(message.start_time)
+            start = _dt(field_value(message, "start_time"))
 
     if not exercises:
         raise InvalidRequest(
