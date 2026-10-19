@@ -6,7 +6,7 @@ from datetime import date
 from typing import Any, Literal
 
 from .. import auth
-from ..errors import NotFound
+from ..errors import InvalidRequest, NotFound
 from ..models.activities import Activity, ActivitySets, ActivitySummary, SetEdit
 from ..models.common import as_date_str
 from ..models.laps import ActivityLaps
@@ -31,6 +31,11 @@ def list_activities(
     ``limit`` is applied here instead. ``activity_type`` takes Garmin's own
     keys, e.g. ``strength_training``, ``running``, ``cycling``.
     """
+    if end_date and not start_date:
+        raise InvalidRequest(
+            "end_date needs a start_date.",
+            detail="Garmin's date search takes a range; give both, or neither for the latest.",
+        )
     parent, subtype = resolve_type(activity_type)
     if start_date:
         # One page of Garmin's search endpoint, bounded by ``limit``. The

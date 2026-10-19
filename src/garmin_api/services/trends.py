@@ -110,21 +110,24 @@ def _daily(metric: Metric, start: date, end: date, aggregation: Aggregation) -> 
                 )
 
     elif metric is Metric.readiness:
-        # Several entries a day: the morning score is the one Garmin labels
-        # AFTER_WAKEUP_RESET; the rest are updates through the day.
-        by_day: dict[date, dict[str, Any]] = {}
+        # Several entries a day; the morning score, as the day summary uses.
+        from .health import morning_readiness
+
+        rows_by_day: dict[date, list[dict[str, Any]]] = {}
         for row in auth.call("get_training_readiness_range", s, e) or []:
             day = _day(row.get("calendarDate"))
-            if not day or row.get("score") is None:
-                continue
-            current = by_day.get(day)
-            morning = row.get("inputContext") == "AFTER_WAKEUP_RESET"
-            if current is None or (morning and current.get("inputContext") != "AFTER_WAKEUP_RESET"):
-                by_day[day] = row
-        for day, row in by_day.items():
-            points.append(
-                Point(period=day, value=float(row["score"]), extra={"level": row.get("level")})
-            )
+            if day:
+                rows_by_day.setdefault(day, []).append(row)
+        for day, rows in rows_by_day.items():
+            chosen = morning_readiness(rows)
+            if chosen is not None:
+                points.append(
+                    Point(
+                        period=day,
+                        value=float(chosen["score"]),
+                        extra={"level": chosen.get("level")},
+                    )
+                )
 
     elif metric is Metric.stress:
         for row in auth.call("get_daily_stress_stats", s, e) or []:

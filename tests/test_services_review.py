@@ -1,0 +1,194 @@
+"""Regressions from the services and models review of 19 Oct 2026."""
+
+from __future__ import annotations
+
+from datetime import UTC, date, datetime
+from typing import Any
+from zoneinfo import ZoneInfo
+
+import pytest
+from pydantic import ValidationError
+
+from garmin_api.errors import InvalidRequest, RateLimited
+from garmin_api.models.health import SleepSummary
+from garmin_api.models.workouts import (
+    EnduranceWorkoutSpec,
+    StrengthExerciseSpec,
+    StrengthWorkoutSpec,
+    Target,
+)
+from garmin_api.services import activities, health, trends, weight, workouts
+
+READINESS = [
+    {"calendarDate": "2026-01-01", "score": 40, "inputContext": "UPDATE_REALTIME_VARIABLES"},
+    {"calendarDate": "2026-01-01", "score": 70, "inputContext": "AFTER_WAKEUP_RESET"},
+]
+
+
+def test_sleep_spo2_and_respiration_are_read_from_the_nightly_summary() -> None:
+    summary = SleepSummary.from_garmin(
+        {
+            "dailySleepDTO": {
+                "calendarDate": "2026-01-01",
+                "averageSpO2Value": 95.0,
+                "averageRespirationValue": 14.0,
+            }
+        }
+    )
+    assert (summary.average_spo2, summary.average_respiration) == (95.0, 14.0)
+
+
+def test_an_end_date_alone_is_refused_rather_than_ignored(fake_garmin: dict[str, Any]) -> None:
+    with pytest.raises(InvalidRequest, match="start_date"):
+        activities.list_activities(end_date="2025-12-31")
+    assert fake_garmin["calls"] == []
+
+
+def test_a_failed_record_type_request_is_not_cached(
+    fake_garmin: dict[str, Any], monkeypatch
+) -> None:
+    monkeypatch.setattr(health, "_record_types", None)
+    answers: list[Any] = [RuntimeError("503"), [{"id": 1, "key": "pr.label.1k.run"}]]
+
+    def types(*_: Any) -> Any:
+        answer = answers.pop(0)
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+    fake_garmin["responses"]["get_personal_record_types"] = types
+    assert health.record_types() == {}
+    assert health.record_types()[1]["label"] == "Fastest 1 km run"
+
+
+def test_records_with_no_date_come_last(fake_garmin: dict[str, Any], monkeypatch) -> None:
+    monkeypatch.setattr(health, "_record_types", None)
+    fake_garmin["responses"].update(
+        {
+            "get_personal_record_types": [],
+            "get_personal_record": [
+                {"id": 12, "typeId": 1, "value": 1.0},
+                {
+                    "id": 10,
+                    "typeId": 1,
+                    "value": 1.0,
+                    "prStartTimeGmtFormatted": "2026-10-01T07:00:00.0",
+                },
+                {
+                    "id": 11,
+                    "typeId": 1,
+                    "value": 1.0,
+                    "prStartTimeGmtFormatted": "2025-05-01T07:00:00.0",
+                },
+            ],
+        }
+    )
+    assert [r.record_id for r in health.records()] == [10, 11, 12]
+
+
+def test_steps_are_unknown_not_zero_when_garmin_fails(fake_garmin: dict[str, Any]) -> None:
+    def outage(*_: Any) -> Any:
+        raise RuntimeError("503")
+
+    fake_garmin["responses"]["get_steps_data"] = outage
+    assert health.steps_summary("2026-01-01").total is None
+
+
+def test_a_rate_limit_on_steps_still_stops(fake_garmin: dict[str, Any]) -> None:
+    def limited(*_: Any) -> Any:
+        raise RateLimited("slow down")
+
+    fake_garmin["responses"]["get_steps_data"] = limited
+    with pytest.raises(RateLimited):
+        health.steps_summary("2026-01-01")
+
+
+def test_the_day_and_the_trend_agree_on_readiness(fake_garmin: dict[str, Any]) -> None:
+    fake_garmin["responses"].update(
+        {"get_training_readiness": READINESS, "get_training_readiness_range": READINESS}
+    )
+    day = health.day("2026-01-01", parts={"readiness"})
+    trend = trends.trend("readiness", "2026-01-01", "2026-01-01")
+    assert day.training_readiness == 70
+    assert [p.value for p in trend.points] == [70.0]
+
+
+def test_a_weigh_in_given_in_utc_lands_on_the_local_day(fake_garmin: dict[str, Any]) -> None:
+    sent: list[Any] = []
+    fake_garmin["responses"].update(
+        {
+            "_user_tzinfo": ZoneInfo("America/New_York"),
+            "add_weigh_in": lambda *a: sent.append(a) or {},
+        }
+    )
+    weight.add_weigh_in(72.4, timestamp=datetime(2026, 10, 19, 2, 0, tzinfo=UTC))
+    assert sent == [(72.4, "kg", "2026-10-18T22:00:00-04:00")]
+
+
+def test_a_weigh_in_with_no_offset_is_passed_on_as_local(fake_garmin: dict[str, Any]) -> None:
+    sent: list[Any] = []
+    fake_garmin["responses"]["add_weigh_in"] = lambda *a: sent.append(a) or {}
+    weight.add_weigh_in(72.4, timestamp="2026-10-18T22:00:00")
+    assert sent == [(72.4, "kg", "2026-10-18T22:00:00")]
+
+
+def test_a_failed_schedule_keeps_the_new_workouts_id(fake_garmin: dict[str, Any]) -> None:
+    def refuse(*_: Any) -> Any:
+        raise InvalidRequest("Garmin rejected the request (400).")
+
+    fake_garmin["responses"].update(
+        {"upload_workout": {"workoutId": 4242, "workoutName": "Push"}, "schedule_workout": refuse}
+    )
+    spec = StrengthWorkoutSpec(
+        name="Push",
+        schedule_date=date(2026, 10, 22),
+        exercises=[StrengthExerciseSpec(category="PUSH_UP")],
+    )
+    with pytest.raises(InvalidRequest) as caught:
+        workouts.create_strength(spec)
+    assert "4242" in (caught.value.detail or "")
+
+
+def test_a_workout_exercise_given_by_category_alone_is_the_generic_one() -> None:
+    spec = StrengthWorkoutSpec(name="Push", exercises=[StrengthExerciseSpec(category="push_up")])
+    assert spec.exercises[0].exercise_name == "PUSH_UP"
+    assert workouts.build_strength(spec)["workoutSegments"]
+
+
+@pytest.mark.parametrize(
+    ("given", "expected"),
+    [
+        ({"pace_per_km": ("5:00", "5:30")}, ("pace_per_km", ("5:30", "5:00"))),
+        ({"heart_rate_bpm": (150, 140)}, ("heart_rate_bpm", (140, 150))),
+        ({"speed_kph": (30.0, 25.0)}, ("speed_kph", (25.0, 30.0))),
+    ],
+)
+def test_a_range_given_either_way_round_is_put_in_order(given, expected) -> None:
+    name, value = expected
+    assert getattr(Target(**given), name) == value
+
+
+@pytest.mark.parametrize(
+    "given",
+    [
+        {"pace_per_km": ("0:00", "0:00")},
+        {"pace_per_km": ("5:75", "5:00")},
+        {"heart_rate_bpm": (0, 150)},
+    ],
+)
+def test_an_impossible_target_is_refused_by_the_spec(given) -> None:
+    with pytest.raises(ValidationError):
+        Target(**given)
+
+
+def test_a_reversed_pace_builds_a_workout() -> None:
+    spec = EnduranceWorkoutSpec.model_validate(
+        {
+            "name": "Tempo",
+            "sport": "running",
+            "steps": [
+                {"distance": 5, "distance_unit": "km", "target": {"pace_per_km": ["5:00", "5:30"]}}
+            ],
+        }
+    )
+    assert workouts.build_endurance(spec)["workoutSegments"]
