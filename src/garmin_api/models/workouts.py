@@ -103,21 +103,37 @@ class StrengthSessionSet(ApiModel):
 
     reps: int | None = Field(default=None, ge=0, le=999)
     weight_kg: float | None = Field(default=None, ge=0, le=1000)
+    # A day at most: well past any real set, and inside the FIT field's range.
     duration_s: float | None = Field(
-        default=None, ge=0, description="Time under tension. Defaults to a few seconds per rep."
+        default=None,
+        ge=0,
+        le=86400,
+        description="Time under tension. Defaults to a few seconds per rep.",
     )
-    rest_s: float | None = Field(default=None, ge=0, description="Rest taken after this set.")
+    rest_s: float | None = Field(
+        default=None, ge=0, le=86400, description="Rest taken after this set."
+    )
 
 
 class StrengthSessionExercise(ApiModel):
     category: str
-    exercise_name: str = ""
+    exercise_name: str = Field(
+        default="", description="Garmin's exercise name. Left empty, the category's generic one."
+    )
     sets: list[StrengthSessionSet] = Field(min_length=1)
 
     @field_validator("category", "exercise_name")
     @classmethod
     def _upper(cls, value: str) -> str:
         return (value or "").upper().strip()
+
+    @model_validator(mode="after")
+    def _generic(self) -> StrengthSessionExercise:
+        # Garmin's generic entry repeats the category ("BENCH_PRESS" /
+        # "BENCH_PRESS"), and every category has one.
+        if not self.exercise_name:
+            self.exercise_name = self.category
+        return self
 
 
 class StrengthSessionSpec(ApiModel):

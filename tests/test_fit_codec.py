@@ -91,7 +91,8 @@ def test_generic_exercise_without_a_variant_round_trips() -> None:
     )
     decoded = decode_strength_session(encode_strength_session(spec))
     assert decoded.exercises[0].category == "BENCH_PRESS"
-    assert decoded.exercises[0].exercise_name == ""
+    # Decoded to the generic entry's own name, so it can be logged again.
+    assert decoded.exercises[0].exercise_name == "BENCH_PRESS"
 
 
 def test_same_serial_encodes_identically(sample_session: StrengthSessionSpec) -> None:
@@ -145,9 +146,22 @@ def test_the_same_session_encodes_identically_by_default(
 def test_different_sessions_get_different_serials(sample_session: StrengthSessionSpec) -> None:
     from garmin_api.fit.encode import session_serial
 
-    changed = sample_session.model_copy(update={"name": "Push B"})
+    changed = sample_session.model_copy(deep=True)
+    changed.exercises[0].sets[0].reps = 11
     assert session_serial(changed) != session_serial(sample_session)
     assert 0 < session_serial(sample_session) < 2**31
+
+
+def test_the_serial_ignores_what_the_file_does_not_carry(
+    sample_session: StrengthSessionSpec,
+) -> None:
+    """A renamed or annotated session is the same session to Garmin's duplicate check."""
+    from garmin_api.fit.encode import session_serial
+
+    renamed = sample_session.model_copy(update={"name": "Push B", "notes": "felt strong"})
+    spelled_out = StrengthSessionSpec.model_validate(sample_session.model_dump())
+    assert session_serial(renamed) == session_serial(sample_session)
+    assert session_serial(spelled_out) == session_serial(sample_session)
 
 
 def test_the_file_carries_records_that_date_it(sample_session: StrengthSessionSpec) -> None:

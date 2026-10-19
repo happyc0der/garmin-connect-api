@@ -4,9 +4,10 @@ Both sides describe the same taxonomy, but spell it differently in two ways,
 each verified against the whole 1,527-entry catalogue:
 
 * Garmin's generic entry for a category repeats the category as the exercise
-  ("BENCH_PRESS" / "BENCH_PRESS"). FIT has no such member; the file simply
-  carries the category with no subtype, which is what "Bench Press" with no
-  variant means.
+  ("BENCH_PRESS" / "BENCH_PRESS"). The file carries it as the category with no
+  subtype, which is what "Bench Press" with no variant means. FIT does have a
+  member named after its category in 15 categories (PUSH_UP is 77, SQUAT 61),
+  which a watch may write instead; both decode to the generic entry's name.
 * Names beginning with a digit are legal in neither language's identifiers.
   Garmin prefixes an underscore ("_45_DEGREE_PLANK"); fit-tool prefixes an N
   ("N45_DEGREE_PLANK").

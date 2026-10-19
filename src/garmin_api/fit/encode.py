@@ -85,12 +85,15 @@ def _record(moment: datetime) -> RecordMessage:
 
 
 def session_serial(spec: StrengthSessionSpec) -> int:
-    """A stable serial number for a session, from its content.
+    """A stable serial number for a session, from what its file records.
 
-    Same session in, same serial out. 31 bits because the field is an
-    unsigned 32-bit integer in which zero means "invalid".
+    Hashed from the file itself, encoded with a placeholder serial, so it
+    follows the sets and times and nothing else: a different name or notes,
+    neither of which the file carries, or defaults written out, do not make
+    the same session look new. 31 bits because the field is an unsigned
+    32-bit integer in which zero means "invalid".
     """
-    digest = hashlib.sha256(spec.model_dump_json().encode()).digest()
+    digest = hashlib.sha256(encode_strength_session(spec, serial=1)).digest()
     return (int.from_bytes(digest[:4], "big") & 0x7FFFFFFF) or 1
 
 
@@ -103,7 +106,11 @@ def encode_strength_session(spec: StrengthSessionSpec, *, serial: int | None = N
     twice; a random serial would make every run look like a new activity.
     """
     builder = FitFileBuilder(auto_define=True)
-    start = spec.start_time if spec.start_time.tzinfo else spec.start_time.replace(tzinfo=UTC)
+    zone = spec.start_time.tzinfo or UTC
+    # Time is counted in UTC: added to a zone-aware time, a timedelta moves the
+    # wall clock, and across a daylight-saving change a 10-minute rest would
+    # take 70.
+    start = spec.start_time.replace(tzinfo=zone).astimezone(UTC)
     serial_number = serial if serial is not None else session_serial(spec)
 
     file_id = FileIdMessage()
@@ -128,17 +135,16 @@ def encode_strength_session(spec: StrengthSessionSpec, *, serial: int | None = N
     total_active = 0.0
     message_index = 0
 
-    for exercise in spec.exercises:
+    for exercise_index, exercise in enumerate(spec.exercises):
         # Validate before writing: a bad name must fail here, not silently
         # produce a file Garmin will reject or mislabel.
         category = fx.category_value(exercise.category)
         subtype = fx.subtype_value(exercise.category, exercise.exercise_name)
 
         for position, entry in enumerate(exercise.sets):
-            reps = entry.reps or 0
             duration = entry.duration_s
             if duration is None:
-                duration = max(reps * SECONDS_PER_REP, 1.0)
+                duration = max((entry.reps or 0) * SECONDS_PER_REP, 1.0)
 
             builder.add(_record(cursor))
             working = SetMessage()
@@ -147,7 +153,9 @@ def encode_strength_session(spec: StrengthSessionSpec, *, serial: int | None = N
             working.start_time = _ms(cursor)
             working.timestamp = _ms(cursor + timedelta(seconds=duration))
             working.duration = duration
-            working.repetitions = reps
+            if entry.reps is not None:
+                # Left out for a timed set, which a watch records without reps.
+                working.repetitions = entry.reps
             working.category = [category]
             if subtype is not None:
                 working.category_subtype = [subtype]
@@ -161,7 +169,9 @@ def encode_strength_session(spec: StrengthSessionSpec, *, serial: int | None = N
 
             # A rest after every set but the last of the last exercise; the
             # caller's own figure wins when they recorded one.
-            is_final = exercise is spec.exercises[-1] and position == len(exercise.sets) - 1
+            is_final = (
+                exercise_index == len(spec.exercises) - 1 and position == len(exercise.sets) - 1
+            )
             rest_s = (
                 entry.rest_s if entry.rest_s is not None else (0.0 if is_final else DEFAULT_REST_S)
             )
@@ -213,7 +223,7 @@ def encode_strength_session(spec: StrengthSessionSpec, *, serial: int | None = N
     activity.total_timer_time = elapsed
     activity.num_sessions = 1
     activity.type = Activity.MANUAL
-    activity.local_timestamp = _fit_local_seconds(cursor)
+    activity.local_timestamp = _fit_local_seconds(cursor.astimezone(zone))
     builder.add(activity)
 
     return bytes(builder.build().to_bytes())
