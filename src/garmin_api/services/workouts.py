@@ -156,22 +156,53 @@ def scheduled(year: int, month: int, *, include_raw: bool = False) -> list[Sched
     return [e for e in entries if e.day is None or (e.day.year == year and e.day.month == month)]
 
 
-def push_to_device(workout_id: int | str, device_id: int | str | None = None) -> Any:
-    """Send a workout to a watch.
+def push_to_device(workout_id: int | str, device_id: int | str | None = None) -> DeviceSummary:
+    """Send a workout to a watch, and say which one.
 
-    The watch picks it up at its next sync, not instantly. With no device id
-    the last-used device is chosen, which is how the library does it; an
-    account with no last-used device has to name one.
+    The watch picks it up at its next sync, not instantly. A push only ever
+    goes to a device on the account's device list. Garmin's "last used"
+    device is not always one: an uploaded file, a smart scale's weigh-in or a
+    session logged by this package makes Garmin record a pseudo-device named
+    "Default", and a workout pushed there never reaches a watch. So with no
+    device id the last-used device is taken only if it is on the list, then
+    the primary activity tracker, then the only device.
     """
-    if device_id is None:
-        last = auth.call("get_device_last_used") or {}
-        device_id = last.get("userDeviceId") if isinstance(last, dict) else None
-        if device_id is None:
+    listed = devices()
+    if device_id is not None:
+        target = next((d for d in listed if d.device_id == int(device_id)), None)
+        if target is None:
             raise InvalidRequest(
-                "No last-used device to push to.",
-                detail="Pass device_id; list_devices gives the ids.",
+                f"Device {device_id} is not on this account.",
+                detail=_device_choices(listed),
             )
-    return auth.call("push_workout_to_device", workout_id, device_id)
+    else:
+        target = _default_push_target(listed)
+    auth.call("push_workout_to_device", workout_id, target.device_id)
+    return target
+
+
+def _default_push_target(listed: list[DeviceSummary]) -> DeviceSummary:
+    last = auth.call("get_device_last_used") or {}
+    last_id = last.get("userDeviceId") if isinstance(last, dict) else None
+    by_id = {d.device_id: d for d in listed}
+    if last_id is not None and int(last_id) in by_id:
+        return by_id[int(last_id)]
+    primary = [d for d in listed if d.primary]
+    if len(primary) == 1:
+        return primary[0]
+    if len(listed) == 1:
+        return listed[0]
+    raise InvalidRequest(
+        "Not sure which device to push to." if listed else "No devices on this account.",
+        detail=_device_choices(listed),
+    )
+
+
+def _device_choices(listed: list[DeviceSummary]) -> str:
+    if not listed:
+        return "Pair a watch with Garmin Connect first; list_devices shows what is paired."
+    names = ", ".join(f"{d.name or d.product or 'unnamed'} ({d.device_id})" for d in listed)
+    return f"Pass device_id, one of: {names}."
 
 
 def devices() -> list[DeviceSummary]:

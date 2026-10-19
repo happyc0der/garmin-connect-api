@@ -189,3 +189,34 @@ def test_edit_the_sets_of_a_logged_session() -> None:
         activity_id = activity_id or uploads.find_uploaded_session(spec)
         if activity_id:
             activities.delete(activity_id)
+
+
+def test_push_a_workout_to_a_real_device_and_delete_it() -> None:
+    """Push a workout with no device named, and check Garmin queued it for a listed device.
+
+    Garmin's last-used device can be a "Default" pseudo-device left by an
+    upload; 0.2.0 pushed there. The workout is deleted at the end, so the watch
+    never receives it; to see one arrive, push a workout of your own and sync.
+    """
+    spec = StrengthWorkoutSpec(
+        name="garmin-connect-api push test",
+        exercises=[
+            StrengthExerciseSpec(category="PUSH_UP", exercise_name="PUSH_UP", sets=1, reps=5)
+        ],
+    )
+    created = workouts.create_strength(spec)
+    try:
+        target = workouts.push_to_device(created.workout_id)
+        assert target.device_id in {d.device_id for d in workouts.devices()}
+
+        queue = (auth.call("get_device_messages") or {}).get("messages") or []
+        ours = [
+            m
+            for m in queue
+            if (m.get("metaData") or {}).get("metaDataId") == int(created.workout_id)
+        ]
+        assert ours, "Garmin should have queued the workout"
+        assert {m.get("deviceId") for m in ours} == {target.device_id}
+        print(f"queued for {target.name} ({target.device_id}): {ours[0].get('messageStatus')}")
+    finally:
+        workouts.delete(created.workout_id)
