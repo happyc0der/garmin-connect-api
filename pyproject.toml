@@ -1,6 +1,6 @@
 [project]
 name = "garmin-connect-api"
-version = "0.2.2"
+version = "0.2.3"
 description = "Read and write Garmin Connect from Python, HTTP or an MCP client: activities, strength sets, health data, workouts, weigh-ins"
 readme = "README.md"
 license = "MIT"

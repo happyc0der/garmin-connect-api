@@ -235,7 +235,7 @@ uv sync
 uv run pytest
 ```
 
-411 offline tests, needing no network and no account, run on Linux, macOS and Windows. They cover the models against real Garmin
+445 offline tests, needing no network and no account, run on Linux, macOS and Windows. They cover the models against real Garmin
 response shapes, the FIT codec's round trip, every one of the 1,527 catalogue exercises against
 the FIT profile, the HTTP routes, and every MCP tool's output against its own advertised schema,
 which strict clients enforce.
