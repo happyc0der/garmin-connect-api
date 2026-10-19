@@ -7,8 +7,9 @@ from typing import Any, Literal
 
 from .. import auth
 from ..errors import NotFound
-from ..models.activities import Activity, ActivitySets, ActivitySummary
+from ..models.activities import Activity, ActivitySets, ActivitySummary, SetEdit
 from ..models.common import as_date_str
+from ..models.laps import ActivityLaps
 
 DownloadFormat = Literal["fit", "tcx", "gpx", "csv"]
 
@@ -196,3 +197,89 @@ def activity_types() -> Any:
 def last_activity(*, include_raw: bool = False) -> ActivitySummary | None:
     payload = auth.call("get_last_activity")
     return ActivitySummary.from_garmin(payload, include_raw=include_raw) if payload else None
+
+
+def laps(activity_id: int | str) -> ActivityLaps:
+    """Laps for a run or ride, and lengths in 100s for a pool swim. Two requests."""
+    from ..models.laps import build
+
+    detail = auth.call("get_activity", str(activity_id)) or {}
+    if not detail:
+        raise NotFound(f"No activity {activity_id}.")
+    summary = detail.get("summaryDTO") or detail
+    sport = ((detail.get("activityTypeDTO") or detail.get("activityType")) or {}).get("typeKey")
+    pool_length, pool_unit = summary.get("poolLength"), None
+    unit = (summary.get("unitOfPoolLength") or {}).get("unitKey")
+    if pool_length:
+        pool_unit = "yd" if unit == "yard" else "m"
+        # Garmin states the length in the pool's own unit; keep it there.
+        pool_length = float(pool_length)
+    splits = auth.call("get_activity_splits", str(activity_id)) or {}
+    return build(int(activity_id), sport, splits, pool_length=pool_length, pool_unit=pool_unit)
+
+
+def edit_sets(activity_id: int | str, edit: SetEdit) -> ActivitySets:
+    """Correct a strength activity's sets, and return them as Garmin now has them.
+
+    Watches guess the exercise from wrist movement and often guess wrong.
+    Garmin replaces all of an activity's sets at once, so this reads them,
+    applies only the requested changes, and writes the full list back. Every
+    exercise is checked against the catalogue first.
+    """
+    from .. import catalogue
+    from ..errors import InvalidRequest
+
+    if not edit.changes and not edit.delete:
+        raise InvalidRequest("Nothing to change.", detail="Give changes, sets to delete, or both.")
+
+    payload = auth.call("get_activity_exercise_sets", activity_id)
+    rows = list((payload or {}).get("exerciseSets") or [])
+    if not rows:
+        raise NotFound(f"Activity {activity_id} has no sets to edit.")
+
+    # Working set number -> row position, numbered as get_sets numbers them.
+    positions: dict[int, int] = {}
+    for position, row in enumerate(rows):
+        if str(row.get("setType") or "").upper() != "REST":
+            positions[len(positions) + 1] = position
+
+    named = {n for change in edit.changes for n in change.sets} | set(edit.delete)
+    unknown = sorted(n for n in named if n not in positions)
+    if unknown:
+        raise InvalidRequest(
+            f"No working set numbered {unknown}.",
+            detail=f"This activity has sets 1 to {len(positions)}.",
+        )
+    if set(edit.delete) & {n for change in edit.changes for n in change.sets}:
+        raise InvalidRequest("A set cannot be both changed and deleted.")
+
+    for change in edit.changes:
+        exercise = None
+        if change.category is not None:
+            name = (change.exercise_name or "").upper().strip()
+            category = change.category.upper().strip()
+            if not name or name == category:
+                # Garmin accepts a known category with no exercise name.
+                if category not in catalogue.categories():
+                    catalogue.validate(category, "")  # raises, with suggestions
+                name = ""
+            else:
+                catalogue.validate(category, name)
+            exercise = {"category": category, "name": name or None, "probability": 100.0}
+        for number in change.sets:
+            row = rows[positions[number]]
+            if exercise is not None:
+                row["exercises"] = [dict(exercise)]
+            if change.reps is not None:
+                row["repetitionCount"] = change.reps
+            if change.weight_kg is not None:
+                row["weight"] = round(change.weight_kg * 1000.0, 1)
+
+    drop = {positions[n] for n in edit.delete}
+    kept = [row for position, row in enumerate(rows) if position not in drop]
+    auth.call(
+        "set_activity_exercise_sets",
+        activity_id,
+        {"activityId": int(activity_id), "exerciseSets": kept},
+    )
+    return get_sets(activity_id)

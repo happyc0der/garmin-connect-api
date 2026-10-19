@@ -135,3 +135,57 @@ def test_record_and_delete_a_body_composition_weigh_in() -> None:
                 weight.delete_weigh_in(str(w.sample_pk), moment.date())
 
     assert not [w for w in weight.day_weigh_ins(moment.date()) if w.weight_kg == 72.4]
+
+
+def test_edit_the_sets_of_a_logged_session() -> None:
+    """Upload a session, correct its sets, check Garmin kept the correction, delete it.
+
+    Like the session test, this creates a real activity for a few seconds; if
+    the account shares to Strava, turn that off first or expect a post there.
+    """
+    from garmin_api.models.activities import SetEdit
+
+    start = datetime.now(UTC) - timedelta(days=2)
+    spec = StrengthSessionSpec(
+        name="garmin-connect-api edit test",
+        start_time=start,
+        exercises=[
+            StrengthSessionExercise(
+                category="CURL",
+                exercise_name="DUMBBELL_BICEPS_CURL",
+                sets=[StrengthSessionSet(reps=10, weight_kg=10.0, rest_s=60) for _ in range(3)],
+            )
+        ],
+    )
+    activity_id: int | None = None
+    try:
+        activity_id = uploads.log_strength_session(spec)["activity_id"]
+        assert activity_id
+
+        edited = activities.edit_sets(
+            activity_id,
+            SetEdit(
+                changes=[
+                    {
+                        "sets": [2, 3],
+                        "category": "ROW",
+                        "exercise_name": "DUMBBELL_ROW",
+                        "weight_kg": 14.0,
+                    }
+                ],
+            ),
+        )
+        assert [s.exercise_name for s in edited.sets] == [
+            "DUMBBELL_BICEPS_CURL",
+            "DUMBBELL_ROW",
+            "DUMBBELL_ROW",
+        ]
+        assert [s.weight_kg for s in edited.sets] == [10.0, 14.0, 14.0]
+
+        after_delete = activities.edit_sets(activity_id, SetEdit(delete=[1]))
+        remaining = [s.exercise_name for s in after_delete.sets]
+        assert remaining == ["DUMBBELL_ROW", "DUMBBELL_ROW"]
+    finally:
+        activity_id = activity_id or uploads.find_uploaded_session(spec)
+        if activity_id:
+            activities.delete(activity_id)

@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.2.0 (unreleased)
+
+Five features, each checked against a real account.
+
+- **Laps and lengths.** `get_activity_laps` gives a run's or ride's laps, and a pool swim's pace
+  per 100 of the pool's own unit (yards in a yard pool), with first half against second half and
+  the fastest and slowest stretch. Ride averages use moving time, as Garmin's own do.
+- **Swim, run and ride workouts.** `create_endurance_workout` builds steps that end on a time, a
+  distance or the lap button, with repeats; runs and rides take pace, speed, heart-rate, power or
+  cadence targets; swims take a stroke, equipment, a pool length and rests on the wall.
+- **Trends.** `get_trend` follows one of twelve metrics (steps, resting heart rate, sleep and sleep
+  score, HRV, readiness, stress, body battery, weight, body fat, running and cycling VO2 max) over
+  up to two years, daily, weekly or monthly, usually in one request.
+- **Editing sets.** `edit_activity_sets` corrects the exercise, reps or weight of a strength
+  activity's sets, or deletes sets, for when a watch guesses the exercise wrong.
+- **Named records.** Personal records now carry a name, a unit and a readable value, such as
+  "Fastest 1 km run, 4:47.5", instead of Garmin's bare type number.
+
 ## 0.1.0 (unreleased)
 
 First public release.

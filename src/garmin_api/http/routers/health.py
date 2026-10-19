@@ -17,6 +17,7 @@ from ...models.health import (
     StressSummary,
     WeighIn,
 )
+from ...models.trends import Aggregation, Metric, Trend
 from ...services import health as service
 from ...services import weight as weight_service
 
@@ -135,3 +136,24 @@ def delete_weigh_in(
     """Delete one weigh-in. Takes the sample_pk that list_weigh_ins returns."""
     weight_service.delete_weigh_in(str(sample_pk), day)
     return {"sample_pk": sample_pk, "status": "deleted"}
+
+
+@router.get("/trends/{metric}", operation_id="get_trend", response_model=Trend)
+def get_trend(
+    metric: Metric,
+    start: date = Query(description="First day, inclusive."),
+    end: date = Query(description="Last day, inclusive."),
+    aggregation: Aggregation | None = Query(
+        None, description="day, week or month. Chosen from the range when left out."
+    ),
+) -> Trend:
+    """How one metric moved over a range, with average, extremes and change.
+
+    Metrics: steps, resting_hr, sleep (hours), sleep_score, hrv, readiness,
+    stress, body_battery, weight, body_fat, vo2max (running), vo2max_cycling.
+    Up to two months comes back daily, up to a year weekly, longer monthly;
+    usually one request to Garmin. Ranges are limited to two years.
+    """
+    from ...services import trends
+
+    return trends.trend(metric, start, end, aggregation=aggregation)
