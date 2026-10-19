@@ -13,11 +13,22 @@ from ..models.health import BodyCompositionSpec, WeighIn
 def weigh_ins(
     start: date | str, end: date | str | None = None, *, include_raw: bool = False
 ) -> list[WeighIn]:
-    payload = auth.call(
-        "get_body_composition", as_date_str(start), as_date_str(end) if end else None
-    )
-    rows = (payload or {}).get("dateWeightList") or []
-    return [WeighIn.from_garmin(r, include_raw=include_raw) for r in rows]
+    """Every weigh-in in a date range, oldest first.
+
+    Uses Garmin's weight-range call with ``includeAll``. The body-composition
+    date-range call looks equivalent but returns one weigh-in per day, so a
+    day with two readings silently lost one -- found when a sync of 35 smart-scale
+    weigh-ins appeared to have landed only 31.
+    """
+    start_str = as_date_str(start)
+    payload = auth.call("get_weigh_ins", start_str, as_date_str(end) if end else start_str)
+    entries = [
+        entry
+        for day in (payload or {}).get("dailyWeightSummaries") or []
+        for entry in day.get("allWeightMetrics") or []
+    ]
+    rows = [WeighIn.from_garmin(e, include_raw=include_raw) for e in entries]
+    return sorted(rows, key=lambda w: (w.timestamp is None, w.timestamp))
 
 
 def day_weigh_ins(day: date | str, *, include_raw: bool = False) -> list[WeighIn]:

@@ -318,12 +318,46 @@ class TestUploads:
 
 class TestWeight:
     def test_weigh_ins_convert_grams(self, fake_garmin: dict[str, Any]) -> None:
-        fake_garmin["responses"]["get_body_composition"] = {
-            "dateWeightList": [{"weight": 81400.0, "bodyFat": 18.2, "calendarDate": "2026-09-21"}]
+        fake_garmin["responses"]["get_weigh_ins"] = {
+            "dailyWeightSummaries": [
+                {
+                    "summaryDate": "2026-09-21",
+                    "allWeightMetrics": [
+                        {"weight": 81400.0, "bodyFat": 18.2, "calendarDate": "2026-09-21"}
+                    ],
+                }
+            ]
         }
         found = weight.weigh_ins(date(2026, 9, 1), date(2026, 9, 30))
         assert found[0].weight_kg == 81.4
         assert found[0].body_fat_pct == 18.2
+
+    def test_a_day_with_two_weigh_ins_returns_both(self, fake_garmin: dict[str, Any]) -> None:
+        """The date-range call once kept one per day; 35 synced looked like 31."""
+        fake_garmin["responses"]["get_weigh_ins"] = {
+            "dailyWeightSummaries": [
+                {
+                    "summaryDate": "2026-02-16",
+                    "numOfWeightEntries": 2,
+                    "allWeightMetrics": [
+                        {
+                            "samplePk": 2,
+                            "weight": 72400.0,
+                            "timestampGMT": 1771240000000,
+                            "sourceType": "INDEX_SCALE",
+                        },
+                        {
+                            "samplePk": 1,
+                            "weight": 72400.0,
+                            "timestampGMT": 1771290000000,
+                            "sourceType": "MANUAL",
+                        },
+                    ],
+                }
+            ]
+        }
+        found = weight.weigh_ins("2026-02-16", "2026-02-16")
+        assert [w.sample_pk for w in found] == [2, 1], "both, oldest first"
 
     def test_adding_a_weight_sends_kilograms(self, fake_garmin: dict[str, Any]) -> None:
         """This endpoint is the exception: it takes kg, not grams."""

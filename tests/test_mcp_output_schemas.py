@@ -87,7 +87,11 @@ GARMIN = {
     "get_hrv_data": {"hrvSummary": {"lastNightAvg": 61, "status": "LOW"}},
     "get_training_readiness": [{"score": 58}],
     "get_daily_weigh_ins": {"dateWeightList": [{"weight": 81400.0, "calendarDate": "2026-10-18"}]},
-    "get_body_composition": {"dateWeightList": [{"weight": 81400.0, "calendarDate": "2026-10-18"}]},
+    "get_weigh_ins": {
+        "dailyWeightSummaries": [
+            {"allWeightMetrics": [{"weight": 81400.0, "calendarDate": "2026-10-18"}]}
+        ]
+    },
     "get_stress_data": {
         "calendarDate": "2026-10-18",
         "avgStressLevel": 33,

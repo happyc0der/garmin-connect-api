@@ -144,15 +144,19 @@ def test_records_keep_garmins_type_id(fake_garmin: dict[str, Any]) -> None:
 
 
 def test_weigh_ins_carry_the_id_delete_needs(fake_garmin: dict[str, Any]) -> None:
-    fake_garmin["responses"]["get_body_composition"] = {
-        "dateWeightList": [
+    fake_garmin["responses"]["get_weigh_ins"] = {
+        "dailyWeightSummaries": [
             {
-                "samplePk": 1771000000001,
-                "calendarDate": "2026-02-16",
-                "timestampGMT": 1771290000000,
-                "weight": 72400.0,
-                "metabolicAge": 24,
-                "sourceType": "MANUAL",
+                "allWeightMetrics": [
+                    {
+                        "samplePk": 1771000000001,
+                        "calendarDate": "2026-02-16",
+                        "timestampGMT": 1771290000000,
+                        "weight": 72400.0,
+                        "metabolicAge": 24,
+                        "sourceType": "MANUAL",
+                    }
+                ]
             }
         ]
     }

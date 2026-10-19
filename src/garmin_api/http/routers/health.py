@@ -99,7 +99,10 @@ def weigh_ins(
     start: date = Query(description="First day, inclusive."),
     end: date | None = Query(None, description="Last day, inclusive."),
 ) -> list[WeighIn]:
-    """Body weight and composition entries over a date range."""
+    """Every weigh-in over a date range, oldest first, with body composition.
+
+    Includes every reading on days with more than one.
+    """
     return weight_service.weigh_ins(start, end)
 
 
