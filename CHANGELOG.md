@@ -1,5 +1,40 @@
 # Changelog
 
+## 0.2.4 (2026-10-19)
+
+A fourth review round: 0.2.3's own changes checked for regressions, and a security and
+data-integrity audit of the whole package by a reviewer new to it. Each finding was reproduced
+before it was fixed, and each fix has a test that fails without it. Upgrading from 0.2.3 is
+recommended: its first item can lock a running server out of the account.
+
+### Fixed
+
+- **One network blip locked a 0.2.3 server out of the account.** A dropped connection or a 503
+  while loading the profile, which the library reports as an authentication error, was held
+  against the stored tokens until a restart or a new login, with every call saying "run `garmin
+  login`"; a reply Garmin marks privacy-protected did the same to every tool. Only a 401 or 403
+  holds the tokens now, the hold lapses after ten minutes, and a network failure is reported as
+  one.
+- **A retried set edit could delete the wrong set.** When Garmin applied an edit but could not
+  read it back, the tool reported an error, and a retried "delete set 2" deleted whichever set was
+  set 2 by then. The edit is now reported as applied, with the sets as written.
+- **A name FastAPI's test client uses was trusted.** A page under the name `testserver`, pointed
+  at 127.0.0.1 by a hostile network, could call every write tool of `garmin serve` or
+  `garmin mcp --http`. It is no longer trusted.
+- **Any web page could spend the account's Garmin requests** while the HTTP service ran, with
+  cross-site GETs such as an image tag. Requests a browser marks cross-site or same-site are
+  refused, and so is a foreign Origin on any method. Responses forbid framing.
+- **An exercise given by its display name alone** was saved as the category's generic exercise.
+  The name is now looked up, and refused if it names no exercise in the category.
+- **Times without an offset** are refused if the account's timezone cannot be read, instead of
+  being placed in the machine's.
+- A small zip could expand to gigabytes when decoded; FIT data is capped at 32 MB.
+
+### Documentation
+
+- SECURITY.md said logging out and in again replaces leaked tokens. Logging out deletes only the
+  local copy; it now says to change the Garmin password.
+
 ## 0.2.3 (2026-10-19)
 
 A third review round: 0.2.2's own changes checked for regressions, concurrency and process
