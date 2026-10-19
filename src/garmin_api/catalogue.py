@@ -76,11 +76,64 @@ def _words(value: str) -> list[str]:
     return re.findall(r"[a-z0-9]+", value.lower())
 
 
+def _stems(token: str) -> list[str]:
+    """What a query word may stand for, plurals undone: "presses" -> "press"."""
+    stems = [token]
+    if len(token) >= 3 and token.endswith("s"):
+        stems.append(token[:-1])
+    if len(token) >= 4 and token.endswith("es"):
+        stems.append(token[:-2])
+    return stems
+
+
+def _singular(word: str) -> str:
+    """One word's singular, for looking up aliases: "crushers" -> "crusher"."""
+    if word.endswith(("ches", "shes", "sses", "xes")):
+        return word[:-2]
+    if len(word) > 3 and word.endswith("s") and not word.endswith("ss"):
+        return word[:-1]
+    return word
+
+
 def _starts(word: str, token: str) -> bool:
     """A query word starts a name word, tolerating a plural: "dips" finds "Dip"."""
-    if word.startswith(token):
-        return True
-    return len(token) >= 3 and token.endswith("s") and word.startswith(token[:-1])
+    return any(word.startswith(stem) for stem in _stems(token))
+
+
+def _query_tokens(term: str) -> list[str]:
+    """The query's words, with gym names Garmin does not use replaced."""
+    words = _words(term)
+    singular = [_singular(w) for w in words]
+    phrase = " ".join(singular)
+    whole = ALIASES.get(phrase) or ALIASES.get(phrase.replace(" ", ""))
+    if whole:
+        return _words(whole)
+    return _words(" ".join(ALIASES.get(s, w) for w, s in zip(words, singular, strict=True)))
+
+
+def _ranked(term: str) -> list[tuple[int, Exercise]]:
+    """Every match for ``term`` with its rank, best first. 0 is exact, 1 every
+    word found, 2 found with spaces and hyphens ignored."""
+    tokens = _query_tokens(term)
+    if not tokens:
+        return []
+    joined = [j for j in _stems("".join(tokens)) if len(j) >= 5]
+
+    scored: list[tuple[int, int, str, Exercise]] = []
+    for exercise in all_exercises():
+        words = _words(exercise.name)
+        flat = "".join(words)
+        if [_singular(w) for w in words] == [_singular(t) for t in tokens]:
+            rank = 0
+        elif all(any(_starts(w, tok) for w in words) for tok in tokens):
+            rank = 1
+        elif any(j in flat for j in joined):
+            rank = 2
+        else:
+            continue
+        scored.append((rank, len(words), exercise.name, exercise))
+    scored.sort(key=lambda row: row[:3])
+    return [(row[0], row[3]) for row in scored]
 
 
 def search(term: str, limit: int = 20) -> list[Exercise]:
@@ -88,32 +141,13 @@ def search(term: str, limit: int = 20) -> list[Exercise]:
 
     A name matches when every word of the query starts one of its words, so
     "pull up" finds "Pull-up" and "lat pulldown" finds "Lat Pull-down", while
-    "rdl" no longer matches inside "Hurdle". A query of five or more letters
-    also matches with spaces and hyphens ignored, so "pullup" works too.
-    Common gym names Garmin does not use, like "skull crusher", are aliased.
+    "rdl" no longer matches inside "Hurdle". Plurals are understood, "bench
+    presses" and "crunches" included. A query of five or more letters also
+    matches with spaces and hyphens ignored, so "pullups" works too. Common
+    gym names Garmin does not use, like "skull crushers" or the "rdl" in
+    "dumbbell rdl", are aliased.
     """
-    query = " ".join(_words(term))
-    query = ALIASES.get(query, ALIASES.get(query.replace(" ", ""), query))
-    tokens = _words(query)
-    if not tokens:
-        return []
-    joined = "".join(tokens)
-
-    scored: list[tuple[int, int, str, Exercise]] = []
-    for exercise in all_exercises():
-        words = _words(exercise.name)
-        flat = "".join(words)
-        if words == tokens:
-            rank = 0
-        elif all(any(_starts(w, tok) for w in words) for tok in tokens):
-            rank = 1
-        elif len(joined) >= 5 and joined in flat:
-            rank = 2
-        else:
-            continue
-        scored.append((rank, len(words), exercise.name, exercise))
-    scored.sort(key=lambda row: row[:3])
-    return [row[3] for row in scored[:limit]]
+    return [exercise for _, exercise in _ranked(term)[: max(limit, 0)]]
 
 
 def resolve(name: str) -> Exercise | None:
@@ -169,9 +203,11 @@ def match(name: str) -> Exercise | None:
     """Best effort: map a free-text exercise name onto the catalogue.
 
     For callers holding names from somewhere else ("Barbell Bench Press",
-    "bench press"). Exact and normalised matches first, then the closest
-    fuzzy match above a conservative threshold, so a bad guess returns None
-    rather than silently logging the wrong lift.
+    "bench press"). Exact and normalised matches first. Then a close spelling,
+    but only one with the same words, allowing a typo inside a word: a
+    one-letter change can be a different lift ("Hack Squat" is not "Back
+    Squats"). Then a search that finds exactly one exercise. Anything less
+    certain returns None rather than silently logging the wrong lift.
     """
     direct = resolve(name)
     if direct:
@@ -179,8 +215,23 @@ def match(name: str) -> Exercise | None:
     # Compare lowercased, or "bench press" scores badly against the catalogue's
     # "Bench Press" purely on capitalisation.
     lookup = _by_lower_name()
-    close = difflib.get_close_matches(name.strip().lower(), list(lookup), n=1, cutoff=0.82)
-    return lookup[close[0]] if close else None
+    query = name.strip().lower()
+    for close in difflib.get_close_matches(query, list(lookup), n=3, cutoff=0.82):
+        if _same_words(_words(query), _words(close)):
+            return lookup[close]
+    found = [exercise for rank, exercise in _ranked(name) if rank <= 1]
+    return found[0] if len(found) == 1 else None
+
+
+def _same_words(ours: list[str], theirs: list[str]) -> bool:
+    """Word for word the same, up to plurals and a typo that keeps the first letter."""
+
+    def same(a: str, b: str) -> bool:
+        if _singular(a) == _singular(b):
+            return True
+        return a[:1] == b[:1] and difflib.SequenceMatcher(None, a, b).ratio() >= 0.8
+
+    return len(ours) == len(theirs) and all(same(a, b) for a, b in zip(ours, theirs, strict=True))
 
 
 def _normalise(value: str) -> str:

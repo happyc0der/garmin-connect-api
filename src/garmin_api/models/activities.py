@@ -10,7 +10,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Self
 
-from pydantic import Field, model_validator
+from pydantic import Field, computed_field, model_validator
 
 from .common import ApiModel, first, grams_to_kg, parse_dt, parse_local
 
@@ -170,6 +170,7 @@ class ActivitySets(ApiModel):
     def working_sets(self) -> list[StrengthSet]:
         return [s for s in self.sets if not s.is_rest]
 
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def total_volume_kg(self) -> float:
         """Sum of reps times weight over the working sets.

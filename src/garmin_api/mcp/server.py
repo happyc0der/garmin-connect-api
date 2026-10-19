@@ -11,11 +11,12 @@ from __future__ import annotations
 
 import os
 from datetime import date, timedelta
-from typing import Any
+from typing import Annotated, Any
 
 from fastmcp import FastMCP
 from fastmcp.server.providers.openapi import MCPType, RouteMap
 from mcp.types import ToolAnnotations
+from pydantic import Field
 
 from .. import __version__, auth, catalogue
 from ..errors import NotAuthenticated, RateLimited
@@ -42,6 +43,9 @@ can lock the account out for a day or more.
 # Paths answered entirely from the bundled catalogue or the service itself:
 # they never reach Garmin, so they are not "open world".
 LOCAL_PATHS = ("/healthz", "/v1/exercises/")
+# Overwrites that do something different when repeated: deleting set 2 again
+# deletes what was set 3.
+NOT_IDEMPOTENT = frozenset({"edit_activity_sets"})
 
 
 def _annotate(route: Any, component: Any) -> None:
@@ -61,7 +65,10 @@ def _annotate(route: Any, component: Any) -> None:
         )
     elif method in ("DELETE", "PATCH", "PUT"):
         hints = ToolAnnotations(
-            read_only_hint=False, destructive_hint=True, idempotent_hint=True, open_world_hint=True
+            read_only_hint=False,
+            destructive_hint=True,
+            idempotent_hint=str(getattr(route, "operation_id", "")) not in NOT_IDEMPOTENT,
+            open_world_hint=True,
         )
     else:
         hints = ToolAnnotations(
@@ -143,7 +150,31 @@ def create_mcp() -> FastMCP:
     )
 
     _add_convenience_tools(mcp)
+    _guard_http(mcp)
     return mcp
+
+
+def _guard_http(mcp: FastMCP) -> None:
+    """Serve MCP over HTTP behind the same guard as the HTTP API.
+
+    Over HTTP the tools are as reachable as the API's routes, and they write
+    through an in-process client that already holds the key, so the guard has
+    to sit in front of the MCP endpoint itself. Wrapping ``http_app`` covers
+    ``run(transport="http")`` too, which builds its app through it.
+    """
+    from starlette.middleware import Middleware
+
+    from ..http.app import RequestGuard
+
+    unguarded = mcp.http_app
+
+    def http_app(
+        path: str | None = None, *, middleware: list[Any] | None = None, **kwargs: Any
+    ) -> Any:
+        guarded = [Middleware(RequestGuard), *(middleware or [])]
+        return unguarded(path, middleware=guarded, **kwargs)
+
+    mcp.http_app = http_app  # type: ignore[method-assign,assignment]
 
 
 def _add_convenience_tools(mcp: FastMCP) -> None:
@@ -173,7 +204,9 @@ def _add_convenience_tools(mcp: FastMCP) -> None:
             title="Find exercise", read_only_hint=True, idempotent_hint=True, open_world_hint=False
         )
     )
-    def find_exercise(query: str, limit: int = 10) -> list[dict[str, str]]:
+    def find_exercise(
+        query: str, limit: Annotated[int, Field(ge=1, le=100)] = 10
+    ) -> list[dict[str, str]]:
         """Find Garmin's category and exercise_name for an exercise.
 
         Always use this before creating a workout or logging a session with an

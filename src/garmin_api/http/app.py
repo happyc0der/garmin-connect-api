@@ -11,12 +11,15 @@ description, so they are written to be read by a model as well as a person.
 from __future__ import annotations
 
 import hmac
+import logging
 import os
+from collections.abc import Mapping
 from typing import Any
 from urllib.parse import urlsplit
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
+from pydantic import ValidationError
 
 from .. import __version__, auth
 from ..errors import GarminApiError
@@ -32,9 +35,65 @@ SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 OPEN_PATHS = frozenset({"/healthz", "/docs", "/docs/oauth2-redirect", "/redoc", "/openapi.json"})
 
 
+logger = logging.getLogger(__name__)
+
+
 def _extra_hosts() -> frozenset[str]:
     raw = os.getenv(HOSTS_ENV, "")
     return frozenset(h.strip().lower() for h in raw.split(",") if h.strip())
+
+
+def refusal(headers: Mapping[str, str], method: str, path: str) -> JSONResponse | None:
+    """Why a request must be refused, or None. Keeps other web pages, and other
+    hosts' names, away from the account.
+
+    The service can write to Garmin, and a page open in any browser on this
+    machine can send requests to localhost. Three checks:
+
+    * A request for a host name other than the ones the service answers to is
+      refused, which defeats DNS rebinding.
+    * A write that carries an ``Origin`` header came from a web page, and is
+      refused unless that page is this service itself: same host and port. A
+      page served by anything else on localhost is another site.
+    * When GARMIN_API_KEY is set, every request outside the docs and the
+      health check must present it, compared in constant time.
+    """
+    host_header = (headers.get("host") or "").strip().lower()
+    host = (urlsplit("//" + host_header).hostname or "") if host_header else ""
+    if host_header and host not in LOCAL_HOSTS | _extra_hosts():
+        return JSONResponse(status_code=403, content={"error": "Forbidden host"})
+
+    origin = headers.get("origin")
+    foreign = origin is not None and urlsplit(origin.strip()).netloc.lower() != host_header
+    if foreign and method.upper() not in SAFE_METHODS:
+        return JSONResponse(status_code=403, content={"error": "Cross-origin write refused"})
+
+    expected = os.getenv(API_KEY_ENV)
+    if expected and path not in OPEN_PATHS:
+        scheme, _, supplied = (headers.get("authorization") or "").partition(" ")
+        if scheme.lower() != "bearer" or not hmac.compare_digest(
+            supplied.strip().encode(), expected.encode()
+        ):
+            return JSONResponse(status_code=401, content={"error": "Unauthorized"})
+    return None
+
+
+class RequestGuard:
+    """ASGI middleware applying :func:`refusal`, for this app and the MCP HTTP server."""
+
+    def __init__(self, app: Any) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
+        if scope.get("type") == "http":
+            headers = {
+                k.decode("latin-1").lower(): v.decode("latin-1") for k, v in scope["headers"]
+            }
+            refused = refusal(headers, scope.get("method", "GET"), scope.get("path", ""))
+            if refused is not None:
+                await refused(scope, receive, send)
+                return
+        await self.app(scope, receive, send)
 
 
 def create_app() -> FastAPI:
@@ -52,42 +111,36 @@ def create_app() -> FastAPI:
     async def _garmin_error(_: Request, exc: GarminApiError) -> JSONResponse:
         return JSONResponse(status_code=exc.status, content=exc.as_dict())
 
+    @app.exception_handler(ValidationError)
+    async def _unexpected_shape(_: Request, exc: ValidationError) -> JSONResponse:
+        # Request bodies and parameters are validated before a route runs and
+        # answer 422; a ValidationError inside one comes from Garmin's reply.
+        return JSONResponse(
+            status_code=502,
+            content={
+                "error": "GarminUnavailable",
+                "message": "Garmin answered in a shape this package did not expect.",
+                "detail": str(exc),
+            },
+        )
+
     @app.middleware("http")
-    async def _guard(request: Request, call_next: Any) -> Any:
-        """Keep other web pages, and other hosts' names, away from the account.
+    async def _no_bare_500(request: Request, call_next: Any) -> Any:
+        """Answer any other failure with a JSON error rather than a raised exception.
 
-        The service can write to Garmin, and a page open in any browser on
-        this machine can send requests to localhost. Three checks:
-
-        * A write that carries an ``Origin`` header came from a web page, and
-          is refused unless that page is this service itself.
-        * A request for a host name other than the ones the service answers to
-          is refused, which defeats DNS rebinding.
-        * When GARMIN_API_KEY is set, every request outside the docs and the
-          health check must present it, compared in constant time.
+        The MCP tools call this app in-process, where an exception that
+        escapes the app would be reported as the model's own invalid input.
         """
-        host = (request.headers.get("host") or "").rsplit(":", 1)[0].strip("[]").lower()
-        allowed_hosts = LOCAL_HOSTS | _extra_hosts()
-        if host and host not in allowed_hosts:
-            return JSONResponse(status_code=403, content={"error": "Forbidden host"})
+        try:
+            return await call_next(request)
+        except Exception as exc:  # noqa: BLE001 -- the last line of defence
+            logger.exception("Unhandled error on %s %s", request.method, request.url.path)
+            return JSONResponse(
+                status_code=500,
+                content={"error": type(exc).__name__, "message": str(exc), "detail": None},
+            )
 
-        origin = request.headers.get("origin")
-        if origin and request.method not in SAFE_METHODS:
-            origin_host = (urlsplit(origin).hostname or "").lower()
-            if origin_host not in allowed_hosts:
-                return JSONResponse(
-                    status_code=403, content={"error": "Cross-origin write refused"}
-                )
-
-        expected = os.getenv(API_KEY_ENV)
-        if expected and request.url.path not in OPEN_PATHS:
-            header = request.headers.get("authorization") or ""
-            scheme, _, supplied = header.partition(" ")
-            if scheme.lower() != "bearer" or not hmac.compare_digest(
-                supplied.strip().encode(), expected.encode()
-            ):
-                return JSONResponse(status_code=401, content={"error": "Unauthorized"})
-        return await call_next(request)
+    app.add_middleware(RequestGuard)
 
     @app.get("/healthz", operation_id="healthz", tags=["service"])
     def healthz() -> dict[str, Any]:

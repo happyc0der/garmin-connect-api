@@ -19,6 +19,12 @@ class GarminApiError(Exception):
         self.message = message
         self.detail = detail
 
+    def __str__(self) -> str:
+        # The detail says what to do ("Run `garmin login`", "Do not retry"),
+        # so it travels with the message wherever the error is shown as text,
+        # as the hand-written MCP tools' errors are.
+        return f"{self.message} {self.detail}" if self.detail else self.message
+
     def as_dict(self) -> dict[str, str | None]:
         return {"error": type(self).__name__, "message": self.message, "detail": self.detail}
 
