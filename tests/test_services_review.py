@@ -192,3 +192,30 @@ def test_a_reversed_pace_builds_a_workout() -> None:
         }
     )
     assert workouts.build_endurance(spec)["workoutSegments"]
+
+
+def _monthly_vo2(*_: Any, **__: Any) -> list[dict[str, Any]]:
+    return [
+        {"generic": {"calendarDate": f"2025-{m:02d}-01", "vo2MaxPreciseValue": 50.0 + m / 10}}
+        for m in range(1, 13)
+    ]
+
+
+def test_vo2max_points_garmin_grouped_are_counted_as_periods(fake_garmin: dict[str, Any]) -> None:
+    fake_garmin["responses"]["get_max_metrics_range"] = _monthly_vo2
+    trend = trends.trend("vo2max", "2025-01-01", "2025-12-31")
+    assert {p.days for p in trend.points} == {None}
+    assert trend.summary["periods_with_data"] == 12
+    assert "days_with_data" not in trend.summary
+
+
+def test_a_vo2max_month_overlapping_the_start_is_kept(fake_garmin: dict[str, Any]) -> None:
+    fake_garmin["responses"]["get_max_metrics_range"] = _monthly_vo2
+    trend = trends.trend("vo2max", "2025-01-15", "2025-12-31", aggregation="month")
+    assert trend.points[0].period == date(2025, 1, 1)
+    assert len(trend.points) == 12
+
+
+def test_daily_metrics_still_count_days(fake_garmin: dict[str, Any]) -> None:
+    fake_garmin["responses"]["get_training_readiness_range"] = READINESS
+    assert trends.trend("readiness", "2026-01-01", "2026-01-01").summary["days_with_data"] == 1
