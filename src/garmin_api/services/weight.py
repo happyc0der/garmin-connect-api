@@ -88,6 +88,8 @@ def add_body_composition(spec: BodyCompositionSpec) -> dict[str, Any]:
 
     with tempfile.TemporaryDirectory() as tmp:
         target = Path(tmp) / "body_composition.fit"
+        if spec.timestamp.tzinfo is None:
+            spec = spec.model_copy(update={"timestamp": auth.in_account_time(spec.timestamp)})
         target.write_bytes(encode_body_composition(spec))
         result = upload_file(target)
     result["timestamp"] = spec.timestamp.isoformat()

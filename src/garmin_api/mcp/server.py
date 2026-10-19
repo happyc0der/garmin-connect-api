@@ -64,6 +64,12 @@ def _annotate(route: Any, component: Any) -> None:
     rename loses the old name); POST adds something new. Clients use these to
     decide what may run without asking.
     """
+    from fastmcp.tools import Tool
+
+    # Tools only: a resource's annotations are another type, and giving one
+    # tool hints made every client's resource listing fail.
+    if not isinstance(component, Tool):
+        return
     method = str(getattr(route, "method", "GET")).upper()
     path = str(getattr(route, "path", ""))
     reaches_garmin = not path.startswith(LOCAL_PATHS)
@@ -199,6 +205,14 @@ def _guard_http(mcp: FastMCP) -> None:
     mcp.http_app = http_app  # type: ignore[method-assign,assignment]
 
 
+def _account_timezone() -> str | None:
+    """The Garmin account's timezone, by which its days and local times are counted."""
+    try:
+        return str(auth.call("_user_tzinfo"))
+    except Exception:  # noqa: BLE001 -- a convenience, never worth failing for
+        return None
+
+
 def _garmin_shaped(fn: Any) -> Any:
     """Report a hand-written tool's failures as the generated ones are.
 
@@ -278,7 +292,7 @@ def _add_convenience_tools(mcp: FastMCP) -> None:
         over the working sets.
         """
         found = activities_service.list_activities(
-            limit=max(1, min(count, 25)), activity_type=activities_service.STRENGTH
+            limit=count, activity_type=activities_service.STRENGTH
         )
         results: list[dict[str, Any]] = []
         for activity in found:
@@ -286,6 +300,9 @@ def _add_convenience_tools(mcp: FastMCP) -> None:
                 "activity_id": activity.activity_id,
                 "name": activity.name,
                 "start_time": activity.start_time.isoformat() if activity.start_time else None,
+                # The account's own clock: an evening session in UTC reads as
+                # the next day's.
+                "start_time_local": activity.start_time_local,
                 "duration_s": activity.duration_s,
             }
             if include_sets:
@@ -351,6 +368,7 @@ def _add_convenience_tools(mcp: FastMCP) -> None:
         return {
             "from": first.isoformat(),
             "to": last.isoformat(),
+            "timezone": _account_timezone(),
             "days": days,
             "activities": [
                 {
@@ -358,6 +376,7 @@ def _add_convenience_tools(mcp: FastMCP) -> None:
                     "name": a.name,
                     "type": a.activity_type.type_key if a.activity_type else None,
                     "start_time": a.start_time.isoformat() if a.start_time else None,
+                    "start_time_local": a.start_time_local,
                     "duration_s": a.duration_s,
                 }
                 for a in sessions

@@ -202,6 +202,11 @@ def validate(category: str, exercise_name: str = "") -> Exercise:
     # A category alone is its generic entry, which every category has.
     ex = (exercise_name or "").upper().strip() or cat
 
+    if cat == "UNKNOWN":
+        raise InvalidRequest(
+            "An exercise the watch could not identify cannot be logged as it is.",
+            detail="Name its category and exercise_name; find_exercise can help.",
+        )
     if cat not in categories():
         close = difflib.get_close_matches(cat, categories(), n=5, cutoff=0.4)
         raise InvalidRequest(
@@ -265,7 +270,9 @@ def _significant(words: list[str]) -> list[str]:
 
 
 def _joined(words: list[str]) -> str:
-    return "".join(_significant(words))
+    # Singular as a whole too: "Push-ups" joins to "pushups", which is the
+    # plural of "Push-up"'s "pushup".
+    return _singular("".join(_significant(words)))
 
 
 def _adds_only_an_implement(query: list[str], name: list[str]) -> bool:

@@ -150,7 +150,9 @@ def _decode(data: bytes, name: str) -> StrengthSessionSpec:
             # No rest message: the time between the sets, if the file says, or
             # none. Not an unrecorded rest, which re-encoding would fill in.
             gap = (starts - last_end) / 1000 if starts is not None and last_end is not None else 0
-            last_working.rest_s = round(max(gap, 0.0), 3)
+            # FIT keeps start times to the second and durations to the
+            # millisecond, so a gap under a second is rounding, not a rest.
+            last_working.rest_s = round(gap, 3) if gap >= 1 else 0.0
 
         # A set the watch could not identify is kept, as UNKNOWN, rather than
         # dropped: dropping it lost the set and gave its rest to the one before.

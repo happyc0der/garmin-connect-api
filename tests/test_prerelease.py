@@ -51,12 +51,18 @@ class TestLogin:
     def fake_garmin(self, monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
         seen: list[dict[str, Any]] = []
 
+        class FakeClient:
+            def dump(self, path: str) -> None:
+                Path(path, "garmin_tokens.json").write_text('{"di_token": "t"}')
+
         class FakeGarmin:
             def __init__(self, email: str, password: str, prompt_mfa: Any) -> None:
                 seen.append({"email": email, "password": password, "mfa": prompt_mfa})
+                self.client = FakeClient()
 
             def login(self, tokenstore: str | None = None) -> None:
                 seen[-1]["tokenstore"] = tokenstore
+                seen[-1]["store_was_empty"] = not any(Path(tokenstore or "").iterdir())
                 Path(tokenstore or "", "garmin_tokens.json").write_text("{}")
 
             def get_full_name(self) -> str:
@@ -70,8 +76,17 @@ class TestLogin:
     ) -> None:
         name = auth.interactive_login("me@example.com", "secret", lambda: "123456")
         assert name == "Test User"
-        assert fake_garmin[0]["tokenstore"] == str(no_real_tokens)
         assert auth.has_tokens()
+        assert (no_real_tokens / auth.LOGIN_MARKER).is_file()
+
+    def test_a_login_uses_the_password_even_with_tokens_stored(
+        self, fake_garmin: list[dict[str, Any]], no_real_tokens: Path
+    ) -> None:
+        """Given the real store, the library would resume its tokens and ignore the password."""
+        (no_real_tokens / "garmin_tokens.json").write_text('{"di_token": "account-a"}')
+        auth.interactive_login("b@example.com", "secret", lambda: "123456")
+        assert fake_garmin[0]["tokenstore"] != str(no_real_tokens)
+        assert fake_garmin[0]["store_was_empty"]
 
     def test_the_password_is_not_kept_anywhere(
         self, fake_garmin: list[dict[str, Any]], no_real_tokens: Path

@@ -15,6 +15,7 @@ from __future__ import annotations
 import logging
 import re
 import tempfile
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -77,9 +78,20 @@ def _existing_activity_id(exc: BaseException) -> int | None:
     return None
 
 
+# One session logged at a time in a process: between the look before an upload
+# and the look after it, another log's activity would look like this one's.
+_logging = threading.Lock()
+
+
 def log_strength_session(
     spec: StrengthSessionSpec, *, rename: bool = True, serial: int | None = None
 ) -> dict[str, Any]:
+    """Encode a completed strength session and upload it; see :func:`_log`."""
+    with _logging:
+        return _log(spec, rename=rename, serial=serial)
+
+
+def _log(spec: StrengthSessionSpec, *, rename: bool, serial: int | None) -> dict[str, Any]:
     """Encode a completed strength session and upload it.
 
     Every exercise is validated against Garmin's catalogue first, so a bad
@@ -93,6 +105,8 @@ def log_strength_session(
     for exercise in spec.exercises:
         catalogue.validate(exercise.category, exercise.exercise_name)
 
+    if spec.start_time.tzinfo is None:
+        spec = spec.model_copy(update={"start_time": auth.in_account_time(spec.start_time)})
     data = encode_strength_session(spec, serial=serial)
     # Anything already starting at this instant, such as the watch's own
     # recording or an earlier log of the session, is not the new upload. If
@@ -123,20 +137,51 @@ def log_strength_session(
         # activity appeared moments later. The session's own start time is
         # known exactly, so the new activity is found by it.
         try:
-            activity_id = find_uploaded_session(spec, exclude=already_there)
+            candidates = _new_ids_at(spec, exclude=already_there)
         except Exception as exc:  # noqa: BLE001 -- the upload itself succeeded
             logger.warning("Uploaded, but could not look the activity up: %s", exc)
             result["find_failed"] = str(exc)
-        if activity_id is not None:
+            candidates = []
+        if len(candidates) == 1:
+            activity_id = candidates[0]
             result["status"] = "created"
             result["activity_id"] = activity_id
+        elif candidates:
+            # Several new activities start at this second (a watch syncing
+            # its own recording, say): which is the upload cannot be told.
+            result["candidates"] = candidates
     # Only a new activity is named and described. A duplicate's id is the
     # activity already there, which this call must not change.
     if activity_id and result.get("status") == "created":
         _label(result, activity_id, spec, rename=rename)
+        others = sorted((already_there or set()) - {activity_id})
+        if others:
+            result["also_at_this_time"] = others
+            result["note"] = (
+                f"Other activities already start at this second: {others}. If one is this "
+                "same session, delete the extra with delete_activity."
+            )
+    elif result.get("status") in ("accepted", "processed"):
+        result["note"] = (
+            "Garmin is still processing the upload, so its name and notes are not applied "
+            "yet. Find it later with list_activities by its start time, then name it with "
+            "update_activity."
+        )
 
     result["sets_uploaded"] = spec.total_sets
+    result["duration_s"] = _duration(data)
     return result
+
+
+def _duration(data: bytes) -> float | None:
+    """The session's length as its file records it: sets, defaults and rests."""
+    from fit_tool.fit_file import FitFile
+    from fit_tool.profile.messages.session_message import SessionMessage
+
+    for record in FitFile.from_bytes(data).records:
+        if isinstance(record.message, SessionMessage):
+            return record.message.total_elapsed_time
+    return None
 
 
 def _label(
@@ -178,18 +223,31 @@ def find_uploaded_session(
     exactly, so an unrelated workout the same day is never mistaken for it.
     Ids in ``exclude``, the ones there before an upload, are passed over.
     """
+    found = _new_ids_at(spec, exclude=exclude, attempts=attempts, interval_s=interval_s)
+    # Several at once cannot be told apart; better none than the wrong one.
+    return found[0] if len(found) == 1 else None
+
+
+def _new_ids_at(
+    spec: StrengthSessionSpec,
+    *,
+    exclude: set[int] | None = None,
+    attempts: int | None = None,
+    interval_s: float | None = None,
+) -> list[int]:
+    """New strength activities starting when ``spec`` does, waiting for the first to show."""
     import time
 
     # Read at call time, not bound as defaults, so the settings can be changed.
     attempts = FIND_ATTEMPTS if attempts is None else attempts
     interval_s = FIND_INTERVAL_S if interval_s is None else interval_s
     for attempt in range(attempts):
-        for activity_id in _ids_starting_at(spec):
-            if activity_id not in (exclude or set()):
-                return activity_id
+        found = [i for i in _ids_starting_at(spec) if i not in (exclude or set())]
+        if found:
+            return found
         if attempt < attempts - 1:
             time.sleep(interval_s)
-    return None
+    return []
 
 
 def _ids_starting_at(spec: StrengthSessionSpec) -> list[int]:

@@ -128,6 +128,7 @@ def logout() -> None:
     for file in auth._token_files():
         file.unlink()
         removed += 1
+    (directory / auth.LOGIN_MARKER).unlink(missing_ok=True)
     auth.session().reset()
     typer.echo(f"Removed {removed} token file(s) from {directory}.")
 
@@ -318,8 +319,20 @@ def workout_schedule(
     """Put a workout on the calendar."""
     from .services import workouts as service
 
-    _run(service.schedule, workout_id, when.date())
-    typer.secho(f"Scheduled workout {workout_id} for {when.date()}.", fg=typer.colors.GREEN)
+    entry = _run(service.schedule, workout_id, when.date())
+    typer.secho(
+        f"Scheduled workout {workout_id} for {when.date()} (schedule id {entry.schedule_id}).",
+        fg=typer.colors.GREEN,
+    )
+
+
+@workout_app.command("unschedule")
+def workout_unschedule(schedule_id: int) -> None:
+    """Take a workout off the calendar. Takes the schedule id, not the workout id."""
+    from .services import workouts as service
+
+    _run(service.unschedule, schedule_id)
+    typer.echo(f"Removed calendar entry {schedule_id}.")
 
 
 @workout_app.command("delete")

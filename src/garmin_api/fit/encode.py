@@ -107,6 +107,11 @@ def encode_strength_session(spec: StrengthSessionSpec, *, serial: int | None = N
     fit-tool checks each value's range as it is set, so a session too long
     for FIT's fields fails partway; that is reported as the request's fault.
     """
+    if spec.start_time.tzinfo is None:
+        raise InvalidRequest(
+            "start_time needs a timezone offset to be written to a file.",
+            detail="e.g. 2026-09-21T07:00:00-04:00. Logging a session fills in the account's.",
+        )
     try:
         return _encode(spec, serial)
     except FitEncodingError as exc:

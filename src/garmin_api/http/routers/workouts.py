@@ -93,7 +93,8 @@ def schedule(
     """Put a saved workout on the calendar for a date.
 
     Returns the calendar entry. Its schedule_id, not the workout id, is what
-    unschedule_workout takes.
+    unschedule_workout takes. Scheduling again adds a second entry; to move a
+    workout to another day, unschedule the old entry first.
     """
     return service.schedule(workout_id, day)
 
