@@ -22,10 +22,12 @@ def test_current_library_layout_is_recognised(no_real_tokens: Path) -> None:
     assert auth.token_age_days() is not None
 
 
-def test_older_garth_layout_is_recognised(no_real_tokens: Path) -> None:
+def test_older_garth_tokens_do_not_count_as_a_login(no_real_tokens: Path) -> None:
+    """python-garminconnect 0.3.19 refuses them, so "authenticated" would be a lie."""
     (no_real_tokens / "oauth1_token.json").write_text("{}")
     (no_real_tokens / "oauth2_token.json").write_text("{}")
-    assert auth.has_tokens() is True
+    assert auth.has_tokens() is False
+    assert auth.legacy_tokens() is True
 
 
 def test_session_follows_the_token_directory(

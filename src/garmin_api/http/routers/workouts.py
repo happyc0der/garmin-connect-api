@@ -87,7 +87,7 @@ def push(workout_id: int, device_id: int | None = Query(None)) -> dict[str, Any]
     """Send a workout to a watch.
 
     It arrives at the watch's next sync, not immediately. With no device id
-    Garmin picks the primary training device.
+    the last-used device is chosen.
     """
     service.push_to_device(workout_id, device_id)
     return {"workout_id": workout_id, "status": "queued for device"}

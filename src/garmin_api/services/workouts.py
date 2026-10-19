@@ -23,7 +23,7 @@ from garminconnect.workout import (
 )
 
 from .. import auth, catalogue
-from ..errors import NotFound
+from ..errors import InvalidRequest, NotFound
 from ..models.common import as_date_str
 from ..models.health import DeviceSummary
 from ..models.workouts import ScheduledWorkout, StrengthWorkoutSpec, WorkoutSummary
@@ -155,8 +155,17 @@ def push_to_device(workout_id: int | str, device_id: int | str | None = None) ->
     """Send a workout to a watch.
 
     The watch picks it up at its next sync, not instantly. With no device id
-    Garmin chooses the primary training device.
+    the last-used device is chosen, which is how the library does it; an
+    account with no last-used device has to name one.
     """
+    if device_id is None:
+        last = auth.call("get_device_last_used") or {}
+        device_id = last.get("userDeviceId") if isinstance(last, dict) else None
+        if device_id is None:
+            raise InvalidRequest(
+                "No last-used device to push to.",
+                detail="Pass device_id; list_devices gives the ids.",
+            )
     return auth.call("push_workout_to_device", workout_id, device_id)
 
 

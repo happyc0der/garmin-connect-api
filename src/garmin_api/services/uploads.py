@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from .. import auth, catalogue
-from ..errors import InvalidRequest
+from ..errors import Duplicate, InvalidRequest
 from ..fit import encode_strength_session
 from ..models.workouts import StrengthSessionSpec
 
@@ -45,7 +45,12 @@ def upload_file(path: str | Path) -> dict[str, Any]:
             detail="Garmin accepts .fit, .gpx and .tcx.",
         )
 
-    response = auth.call("upload_activity", str(source))
+    try:
+        response = auth.call("upload_activity", str(source))
+    except Duplicate as exc:
+        # The library raises on Garmin's 409 rather than returning it, and
+        # gives no id for the activity already there.
+        return {"status": "duplicate", "activity_id": None, "messages": [exc.detail or exc.message]}
     return _interpret_upload(response)
 
 

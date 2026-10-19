@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import sys
 from datetime import datetime
+from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
@@ -68,23 +69,22 @@ def _read_bytes(path: Path) -> bytes:
 
 
 @app.command()
-def login(
-    email: str = typer.Option(..., prompt="Garmin email"),
-    tokens: Path | None = typer.Option(None, help="Where to store tokens."),
-) -> None:
+def login(email: str = typer.Option(..., prompt="Garmin email")) -> None:
     """Log in to Garmin and store tokens for the service and the MCP.
 
     The password is prompted for, never taken as an argument, so it does not
     land in shell history. A multi-factor code is prompted for if Garmin asks.
+    Tokens go to GARMINTOKENS if set, else ~/.garmin-api/default -- the one
+    place every other command reads them from.
     """
     password = typer.prompt("Garmin password", hide_input=True)
 
     def prompt_mfa() -> str:
         return typer.prompt("MFA code")
 
-    name = _run(auth.interactive_login, email, password, prompt_mfa, tokens)
+    name = _run(auth.interactive_login, email, password, prompt_mfa)
     typer.secho(f"Logged in as {name}.", fg=typer.colors.GREEN)
-    typer.echo(f"Tokens stored in {tokens or auth.token_dir()}")
+    typer.echo(f"Tokens stored in {auth.token_dir()}")
 
 
 @app.command()
@@ -105,12 +105,16 @@ def logout() -> None:
 def whoami() -> None:
     """Show who is logged in, and the state of the stored tokens."""
     if not auth.has_tokens():
-        typer.secho("Not logged in. Run `garmin login`.", fg=typer.colors.YELLOW)
+        hint = (
+            "Only old-format tokens found, which this version cannot use. Run `garmin login`."
+            if auth.legacy_tokens()
+            else "Not logged in. Run `garmin login`."
+        )
+        typer.secho(hint, fg=typer.colors.YELLOW)
         raise typer.Exit(code=1)
-    client = _run(auth.client)
     _print(
         {
-            "name": client.get_full_name(),
+            "name": _run(auth.call, "get_full_name"),
             "token_dir": str(auth.token_dir()),
             "token_age_days": round(auth.token_age_days() or 0, 1),
         }
@@ -172,13 +176,20 @@ def sets(activity_id: int, include_rests: bool = False) -> None:
     )
 
 
+class Format(StrEnum):
+    fit = "fit"
+    tcx = "tcx"
+    gpx = "gpx"
+    csv = "csv"
+
+
 @app.command()
-def download(activity_id: int, fmt: str = "fit", out: Path | None = None) -> None:
+def download(activity_id: int, fmt: Format = Format.fit, out: Path | None = None) -> None:
     """Download an activity's file. The fit format arrives as a zip."""
     from .services import activities as service
 
-    data = _run(service.download, activity_id, fmt)
-    suffix = "zip" if fmt == "fit" else fmt
+    data = _run(service.download, activity_id, fmt.value)
+    suffix = "zip" if fmt is Format.fit else fmt.value
     target = out or Path(f"activity_{activity_id}.{suffix}")
     target.write_bytes(data)
     typer.echo(f"Wrote {len(data)} bytes to {target}")

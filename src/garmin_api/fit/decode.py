@@ -31,15 +31,36 @@ from . import exercises as fx
 
 def _unwrap(data: bytes) -> bytes:
     """Return FIT bytes, unwrapping a single-entry zip if that is what came."""
+    if not data:
+        raise InvalidRequest("The file is empty.")
     if data[:2] != b"PK":
         return data
-    with zipfile.ZipFile(io.BytesIO(data)) as archive:
-        names = [n for n in archive.namelist() if n.lower().endswith(".fit")]
-        if len(names) != 1:
-            raise InvalidRequest(
-                f"Expected exactly one .fit file in the archive, found {len(names)}."
-            )
-        return archive.read(names[0])
+    try:
+        with zipfile.ZipFile(io.BytesIO(data)) as archive:
+            names = [n for n in archive.namelist() if n.lower().endswith(".fit")]
+            if len(names) != 1:
+                raise InvalidRequest(
+                    f"Expected exactly one .fit file in the archive, found {len(names)}."
+                )
+            return archive.read(names[0])
+    except zipfile.BadZipFile as exc:
+        raise InvalidRequest("The zip archive is damaged.", detail=str(exc)) from exc
+
+
+def parse_fit(data: bytes) -> FitFile:
+    """Parse FIT bytes, or say plainly that they are not a FIT file.
+
+    fit-tool raises a variety of exceptions on malformed input, from its own
+    to IndexError and struct errors; all of them mean the same thing here.
+    """
+    if len(data) < 12 or data[8:12] != b".FIT":
+        raise InvalidRequest(
+            "This is not a FIT file.", detail="A FIT file starts with a .FIT header."
+        )
+    try:
+        return FitFile.from_bytes(data)
+    except Exception as exc:  # noqa: BLE001 -- any parse failure is a bad file
+        raise InvalidRequest("The FIT file could not be read.", detail=str(exc)) from exc
 
 
 def _dt(value: Any) -> datetime | None:
@@ -55,7 +76,7 @@ def decode_strength_session(data: bytes, *, name: str = "Strength Training") -> 
     and rest messages are folded into the ``rest_s`` of the set they follow,
     undoing exactly what the encoder did.
     """
-    fit = FitFile.from_bytes(_unwrap(data))
+    fit = parse_fit(_unwrap(data))
 
     start: datetime | None = None
     exercises: list[StrengthSessionExercise] = []

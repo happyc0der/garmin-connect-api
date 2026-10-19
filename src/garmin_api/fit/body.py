@@ -11,7 +11,6 @@ from __future__ import annotations
 import hashlib
 from datetime import UTC, datetime
 
-from fit_tool.fit_file import FitFile
 from fit_tool.fit_file_builder import FitFileBuilder
 from fit_tool.profile.messages.device_info_message import DeviceInfoMessage
 from fit_tool.profile.messages.file_creator_message import FileCreatorMessage
@@ -90,7 +89,9 @@ def encode_body_composition(spec: BodyCompositionSpec, *, serial: int | None = N
 
 def decode_body_composition(data: bytes) -> list[BodyCompositionSpec]:
     """Every weigh-in in a weight-scale FIT file."""
-    fit = FitFile.from_bytes(data)
+    from .decode import _unwrap, parse_fit
+
+    fit = parse_fit(_unwrap(data))
     found: list[BodyCompositionSpec] = []
     for record in fit.records:
         message = record.message

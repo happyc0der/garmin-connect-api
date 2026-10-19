@@ -32,22 +32,44 @@ def list_activities(
     """
     parent, subtype = resolve_type(activity_type)
     if start_date:
-        # The date-range endpoint takes a top-level type only, so a sub-type is
-        # narrowed here after fetching its parent.
-        rows = auth.call(
-            "get_activities_by_date",
-            as_date_str(start_date),
-            as_date_str(end_date) if end_date else None,
-            parent,
-        )
-        rows = list(rows or [])
+        # One page of Garmin's search endpoint, bounded by ``limit``. The
+        # library's own date-range method pages until Garmin runs dry -- the
+        # whole history for an early start date -- before anything is cut.
+        params: dict[str, str] = {
+            "startDate": as_date_str(start_date),
+            "start": str(start),
+            "limit": str(limit),
+        }
+        if end_date:
+            params["endDate"] = as_date_str(end_date)
+        if parent:
+            params["activityType"] = parent
         if subtype:
+            params["activitySubType"] = subtype
+        rows = list(auth.call("connectapi", _activity_search_url(), params=params) or [])
+        if subtype:
+            # Belt and braces, in case the endpoint ignores the sub-type.
             rows = [r for r in rows if (r.get("activityType") or {}).get("typeKey") == subtype]
-        rows = rows[start : start + limit]
     else:
-        rows = auth.call("get_activities", start, limit, parent, subtype)
-        rows = list(rows or [])
+        rows = list(auth.call("get_activities", start, limit, parent, subtype) or [])
     return [ActivitySummary.from_garmin(r, include_raw=include_raw) for r in rows]
+
+
+def _activity_search_url() -> str:
+    """The search endpoint's path, as the library defines it.
+
+    Read from an instance that has not logged in -- constructing one makes no
+    request -- so the path stays the library's, not a copy of it.
+    """
+    global _search_url
+    if _search_url is None:
+        from garminconnect import Garmin
+
+        _search_url = str(Garmin().garmin_connect_activities)
+    return _search_url
+
+
+_search_url: str | None = None
 
 
 # Garmin's type tree is rooted at "all" (id 17). Its children are the top-level

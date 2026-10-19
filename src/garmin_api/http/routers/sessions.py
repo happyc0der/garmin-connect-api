@@ -51,7 +51,10 @@ async def upload(
             detail="Garmin accepts .fit, .gpx and .tcx.",
         )
     with tempfile.TemporaryDirectory() as tmp:
-        target = Path(tmp) / (file.filename or f"activity{suffix}")
+        # Only the bare name, never the client's path: "../../x.fit" or an
+        # absolute path would otherwise be written outside the temp directory.
+        safe = Path(file.filename or "").name or f"activity{suffix}"
+        target = Path(tmp) / safe
         target.write_bytes(await file.read())
         return service.upload_file(target)
 

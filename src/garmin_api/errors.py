@@ -58,6 +58,12 @@ class InvalidRequest(GarminApiError):
     status = 400
 
 
+class Duplicate(InvalidRequest):
+    """Garmin already holds this activity file."""
+
+    status = 409
+
+
 class GarminUnavailable(GarminApiError):
     """Garmin answered, but not with anything usable."""
 

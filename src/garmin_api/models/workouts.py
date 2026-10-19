@@ -139,9 +139,7 @@ class StrengthSessionSpec(ApiModel):
         # Without an offset the encoder could only guess UTC, and a 7am
         # session in New York would land in Garmin at 3am.
         if value.tzinfo is None:
-            raise ValueError(
-                "start_time needs a timezone offset, e.g. 2026-09-21T07:00:00-04:00"
-            )
+            raise ValueError("start_time needs a timezone offset, e.g. 2026-09-21T07:00:00-04:00")
         return value
 
     @property

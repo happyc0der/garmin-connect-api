@@ -196,7 +196,7 @@ class TestDayParts:
         from garmin_api.mcp import create_mcp
 
         fake_garmin["responses"].update(self.STUBS)
-        fake_garmin["responses"]["get_activities_by_date"] = []
+        fake_garmin["responses"]["connectapi"] = []
         asyncio.run(create_mcp().call_tool("week_summary", {"end_day": "2026-10-18"}))
         assert len(fake_garmin["calls"]) <= 7 * 3 + 1
 

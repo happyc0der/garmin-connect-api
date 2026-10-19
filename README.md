@@ -98,9 +98,16 @@ garmin serve
 Binds to `127.0.0.1:8765`, with interactive docs at `/docs` and the schema at `/openapi.json`.
 39 operations across activities, health, workouts, sessions and the exercise catalogue.
 
-Binding anywhere other than localhost requires `GARMIN_API_KEY` to be set, and the service
-refuses to start without it. The service can write to your Garmin account, so it should not be
-reachable by anything you have not decided to let in.
+The service can write to your Garmin account, so it guards who reaches it:
+
+- **Web pages cannot write to it.** Any page open in a browser on this machine can send requests
+  to localhost, so a write that carries an `Origin` header from anywhere but the service itself is
+  refused.
+- **Foreign host names are refused.** A request must name `127.0.0.1` or `localhost`, which defeats
+  DNS rebinding. Add other names, such as a LAN host name, with `GARMIN_API_HOSTS`.
+- **Beyond localhost it needs a key.** Binding anywhere else requires `GARMIN_API_KEY`, and the
+  service refuses to start without it. The key is checked in constant time on every request except
+  the docs and the health check, and the MCP server's own calls carry it.
 
 ## MCP server
 
@@ -179,7 +186,7 @@ entry.
 uv run pytest
 ```
 
-112 tests, no network and no account needed. They cover the models against real Garmin payload
+164 tests, no network and no account needed. They cover the models against real Garmin payload
 shapes, the FIT codec's round trip, the whole 1,527-entry exercise catalogue against the FIT
 profile, the HTTP routes, the generated MCP tool list, and every tool's output against its own
 advertised schema, which strict MCP clients enforce.

@@ -60,14 +60,31 @@ class TestActivities:
         assert only.activity_type.type_key == "strength_training"
         assert only.start_time == datetime(2026, 9, 21, 5, 0, tzinfo=UTC)
 
-    def test_a_date_range_uses_the_other_endpoint(self, fake_garmin: dict[str, Any]) -> None:
-        fake_garmin["responses"]["get_activities_by_date"] = [ACTIVITY_ROW]
-        activities.list_activities(start_date=date(2026, 9, 1), end_date=date(2026, 9, 30))
+    def test_a_date_range_is_one_bounded_search(self, fake_garmin: dict[str, Any]) -> None:
+        """The library's own method pages through the whole history first."""
+        fake_garmin["responses"]["connectapi"] = [ACTIVITY_ROW]
+        activities.list_activities(start_date=date(2026, 9, 1), end_date=date(2026, 9, 30), limit=5)
 
+        assert len(fake_garmin["calls"]) == 1
         name, args = fake_garmin["calls"][0]
-        assert name == "get_activities_by_date"
-        assert args[0] == "2026-09-01"
-        assert args[1] == "2026-09-30"
+        assert name == "connectapi"
+        assert args[0].endswith("/activities/search/activities")
+
+    def test_the_search_carries_dates_and_limit(self, fake_garmin, monkeypatch) -> None:
+        seen: dict[str, Any] = {}
+
+        def capture(*_a: Any, params: dict[str, str]) -> list[Any]:
+            seen.update(params)
+            return []
+
+        fake_garmin["responses"]["connectapi"] = capture
+        activities.list_activities(start_date=date(2026, 9, 1), end_date=date(2026, 9, 30), limit=5)
+        assert seen == {
+            "startDate": "2026-09-01",
+            "endDate": "2026-09-30",
+            "start": "0",
+            "limit": "5",
+        }
 
     def test_sets_drop_rests_and_convert_grams(self, fake_garmin: dict[str, Any]) -> None:
         fake_garmin["responses"]["get_activity_exercise_sets"] = SETS_PAYLOAD
@@ -371,15 +388,23 @@ class TestActivityTypeFilter:
         assert name == "get_activities"
         assert args[2:] == ("swimming", "lap_swimming")
 
-    def test_a_date_range_narrows_the_sub_type_itself(self, fake_garmin: dict[str, Any]) -> None:
-        fake_garmin["responses"]["get_activities_by_date"] = [
-            {"activityId": 1, "activityType": {"typeKey": "lap_swimming"}},
-            {"activityId": 2, "activityType": {"typeKey": "open_water_swimming"}},
-        ]
+    def test_a_date_range_sends_the_sub_type(self, fake_garmin: dict[str, Any]) -> None:
+        seen: dict[str, Any] = {}
+
+        def capture(*_a: Any, params: dict[str, str]) -> list[Any]:
+            seen.update(params)
+            return [
+                {"activityId": 1, "activityType": {"typeKey": "lap_swimming"}},
+                {"activityId": 2, "activityType": {"typeKey": "open_water_swimming"}},
+            ]
+
+        fake_garmin["responses"]["connectapi"] = capture
         found = activities.list_activities(
             activity_type="lap_swimming", start_date=date(2026, 8, 1)
         )
-        assert [a.activity_id for a in found] == [1]
+        assert seen["activityType"] == "swimming"
+        assert seen["activitySubType"] == "lap_swimming"
+        assert [a.activity_id for a in found] == [1], "narrowed even if Garmin ignores it"
 
 
 class TestRealDataMappings:

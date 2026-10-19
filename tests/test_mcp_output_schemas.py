@@ -67,7 +67,8 @@ SLEEP = {
 
 GARMIN = {
     "get_activities": [ACTIVITY, STRENGTH],
-    "get_activities_by_date": [ACTIVITY, STRENGTH],
+    # Date-range listings go straight to the search endpoint.
+    "connectapi": [ACTIVITY, STRENGTH],
     # The single-activity endpoint nests its fields, unlike the list.
     "get_activity": {
         "activityId": 1,

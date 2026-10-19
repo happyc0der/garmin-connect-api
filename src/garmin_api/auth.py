@@ -25,7 +25,14 @@ from typing import Any
 
 from garminconnect import Garmin
 
-from .errors import GarminUnavailable, InvalidRequest, NotAuthenticated, NotFound, RateLimited
+from .errors import (
+    Duplicate,
+    GarminUnavailable,
+    InvalidRequest,
+    NotAuthenticated,
+    NotFound,
+    RateLimited,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -44,27 +51,27 @@ def token_dir() -> Path:
 
 
 def _token_files() -> list[Path]:
-    """The token files present, in whichever format wrote them.
+    """This package's token file, if present.
 
     python-garminconnect 0.3 keeps everything in one ``garmin_tokens.json``,
     and its own ``token_file_path`` is asked where that is so the two cannot
-    disagree. The older garth layout (``oauth1_token.json`` plus
-    ``oauth2_token.json``) is still recognised, for a token directory shared
-    with tools that have not moved on.
+    disagree. The older garth files (``oauth1_token.json``, ``oauth2_token.json``)
+    are deliberately not counted: 0.3.19 refuses them, so reporting them as a
+    login would say "authenticated" while every call fails.
     """
     from garminconnect.client import token_file_path
 
-    directory = token_dir()
-    found: list[Path] = []
     try:
-        current = token_file_path(str(directory))
-        if current.is_file():
-            found.append(current)
+        current = token_file_path(str(token_dir()))
     except ValueError:
-        pass
-    if directory.is_dir():
-        found.extend(directory.glob("oauth*_token.json"))
-    return found
+        return []
+    return [current] if current.is_file() else []
+
+
+def legacy_tokens() -> bool:
+    """Whether only old garth-format tokens are present, which need a fresh login."""
+    directory = token_dir()
+    return directory.is_dir() and any(directory.glob("oauth*_token.json")) and not _token_files()
 
 
 def has_tokens() -> bool:
@@ -92,15 +99,22 @@ def _status_of(exc: BaseException) -> int | None:
     python-garminconnect keeps the original response on ``.response`` and also
     writes the status into the message, as in "client error (404)".
     """
-    response = getattr(exc, "response", None)
-    status = getattr(response, "status_code", None)
-    if isinstance(status, int):
-        return status
     import re
 
-    match = re.search(r"\((\d{3})\)|API Error (\d{3})", str(exc))
-    if match:
-        return int(match.group(1) or match.group(2))
+    # Walk the cause chain: the library re-raises upload failures as
+    # "Import error: ..." from the original, which is where the status lives.
+    seen: BaseException | None = exc
+    for _ in range(5):
+        if seen is None:
+            break
+        response = getattr(seen, "response", None)
+        status = getattr(response, "status_code", None)
+        if isinstance(status, int):
+            return status
+        match = re.search(r"\((\d{3})\)|API Error (\d{3})", str(seen))
+        if match:
+            return int(match.group(1) or match.group(2))
+        seen = seen.__cause__ or seen.__context__
     return None
 
 
@@ -138,7 +152,16 @@ def translate(exc: Exception) -> Exception:
     if isinstance(exc, GarminConnectInvalidFileFormatError):
         return InvalidRequest("Garmin does not accept this file format.", detail=str(exc))
     if isinstance(exc, GarminConnectConnectionError):
+        if "already exists (duplicate)" in str(exc):
+            return Duplicate("Garmin already has this activity.", detail=str(exc))
         status = _status_of(exc)
+        # Writes go through the library's transport directly rather than its
+        # error mapper, so a 429 or 401 on a write arrives here as a plain
+        # connection error carrying the status. They must still mean "stop".
+        if status == 429:
+            return translate(GarminConnectTooManyRequestsError(str(exc)))
+        if status == 401:
+            return translate(GarminConnectAuthenticationError(str(exc)))
         if status == 404:
             return NotFound("Garmin has no such item.", detail=str(exc))
         if status is not None and 400 <= status < 500:
@@ -195,23 +218,23 @@ class Session:
             self._client = client
             return client
 
-    def call(self, fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
-        """Run one Garmin call, translating failures.
+    def call(self, fn_name: str, *args: Any, **kwargs: Any) -> Any:
+        """Run one Garmin call by method name, translating failures.
 
-        A 401 mid-session means the cached client went stale, so the client is
-        dropped and rebuilt from the stored tokens exactly once. A second
-        failure is reported rather than retried.
+        A 401 mid-session means the cached client went stale, so it is rebuilt
+        from the stored tokens and the call is made once more -- on the new
+        client, which is why the method is looked up by name each time. A
+        second failure is reported rather than retried.
         """
         try:
-            return fn(*args, **kwargs)
+            return getattr(self.client(), fn_name)(*args, **kwargs)
         except Exception as exc:  # noqa: BLE001
             if _is_unauthorized(exc):
                 with self._lock:
                     self._client = None
                 logger.info("Garmin returned 401; reloading tokens and retrying once")
-                self.client()
                 try:
-                    return fn(*args, **kwargs)
+                    return getattr(self.client(), fn_name)(*args, **kwargs)
                 except Exception as retry_exc:  # noqa: BLE001
                     raise translate(retry_exc) from retry_exc
             raise translate(exc) from exc
@@ -251,22 +274,15 @@ def call(fn_name: str, *args: Any, **kwargs: Any) -> Any:
     Services use this rather than touching the client directly, so every
     Garmin call goes through the same locking and error mapping.
     """
-    s = session()
-    bound = getattr(s.client(), fn_name)
-    return s.call(bound, *args, **kwargs)
+    return session().call(fn_name, *args, **kwargs)
 
 
-def interactive_login(
-    email: str,
-    password: str,
-    prompt_mfa: Callable[[], str],
-    tokens: Path | None = None,
-) -> str:
+def interactive_login(email: str, password: str, prompt_mfa: Callable[[], str]) -> str:
     """Log in with a password and store the tokens. Only the CLI calls this.
 
     Returns the display name so the caller can confirm whose account it is.
     """
-    target = tokens or token_dir()
+    target = token_dir()
     target.mkdir(parents=True, exist_ok=True)
     garmin = Garmin(email=email, password=password, prompt_mfa=prompt_mfa)
     try:

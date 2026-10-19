@@ -9,14 +9,16 @@ guidance a model needs but an HTTP caller does not.
 
 from __future__ import annotations
 
-from datetime import UTC, date, datetime, timedelta
+import os
+from datetime import date, timedelta
 from typing import Any
 
 from fastmcp import FastMCP
 from fastmcp.server.providers.openapi import MCPType, RouteMap
 
 from .. import __version__, auth, catalogue
-from ..http.app import create_app
+from ..errors import NotAuthenticated, RateLimited
+from ..http.app import API_KEY_ENV, create_app
 from ..services import activities as activities_service
 
 INSTRUCTIONS = """
@@ -39,8 +41,19 @@ can lock the account out for a day or more.
 def create_mcp() -> FastMCP:
     app = create_app()
 
+    # The generated tools call the app in-process; when the app requires a key,
+    # those calls must carry it too, or every generated tool answers 401.
+    # The base URL is cosmetic -- the transport is in-process ASGI and never
+    # touches a network -- but FastMCP's default host, "fastapi", is one the
+    # app's host guard rightly refuses.
+    key = os.getenv(API_KEY_ENV)
+    client_kwargs: dict[str, Any] = {"base_url": "http://127.0.0.1"}
+    if key:
+        client_kwargs["headers"] = {"Authorization": f"Bearer {key}"}
+
     mcp = FastMCP.from_fastapi(
         app=app,
+        httpx_client_kwargs=client_kwargs,
         name="garmin",
         instructions=INSTRUCTIONS,
         route_maps=[
@@ -139,6 +152,10 @@ def _add_convenience_tools(mcp: FastMCP) -> None:
                         }
                         for s in sets.sets
                     ]
+                except (RateLimited, NotAuthenticated):
+                    # Stop: carrying on would fire more calls at an account
+                    # Garmin is already throttling.
+                    raise
                 except Exception as exc:  # noqa: BLE001 -- one bad activity must not sink the list
                     entry["sets_error"] = str(exc)
             results.append(entry)
@@ -152,7 +169,9 @@ def _add_convenience_tools(mcp: FastMCP) -> None:
         resting heart rate, sleep and training readiness, plus the activities
         in that window.
         """
-        last = date.fromisoformat(end_day) if end_day else datetime.now(UTC).date()
+        # "Today" in the Garmin profile's timezone, not the machine's or UTC's:
+        # after 8pm in New York, UTC is already tomorrow.
+        last = date.fromisoformat(end_day) if end_day else auth.call("today")
         first = last - timedelta(days=6)
 
         from ..services import health as health_service
