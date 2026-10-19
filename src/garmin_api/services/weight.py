@@ -62,7 +62,7 @@ def add_weigh_in(
             # Garmin files a weigh-in under the local date and time it is
             # given, so an instant in UTC would land on the wrong evening's
             # day; it is moved into the account's own timezone first.
-            moment = moment.astimezone(auth.call("_user_tzinfo"))
+            moment = moment.astimezone(auth.account_zone())
         stamp = moment.isoformat()
     return auth.call("add_weigh_in", weight, unit, stamp)
 

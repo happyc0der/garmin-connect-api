@@ -205,7 +205,7 @@ class TestDayParts:
         asyncio.run(create_mcp().call_tool("week_summary", {"end_day": "2026-10-18"}))
         # The account's timezone comes from the client's cache, loaded once when
         # it connects, so it is not a request to Garmin.
-        requests = [c for c in fake_garmin["calls"] if c[0] != "_user_tzinfo"]
+        requests = [c for c in fake_garmin["calls"] if c[0] != "get_user_timezone"]
         assert len(requests) <= 7 * 3 + 1
 
 
@@ -261,7 +261,6 @@ class TestBodyCompositionFit:
     def test_a_naive_timestamp_is_recorded_in_the_accounts_zone(
         self, fake_garmin: dict[str, Any]
     ) -> None:
-        from zoneinfo import ZoneInfo
 
         from garmin_api.fit.body import decode_body_composition as decode
 
@@ -272,7 +271,7 @@ class TestBodyCompositionFit:
             return {"detailedImportResult": {"successes": [{}], "failures": []}}
 
         fake_garmin["responses"].update(
-            {"_user_tzinfo": ZoneInfo("America/New_York"), "upload_activity": upload}
+            {"get_user_timezone": "America/New_York", "upload_activity": upload}
         )
         weight.add_body_composition(
             BodyCompositionSpec(timestamp=datetime(2026, 10, 19, 7, 30), weight_kg=72.4)

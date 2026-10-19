@@ -239,7 +239,7 @@ def _guard_http(mcp: FastMCP) -> None:
 def _account_timezone() -> str | None:
     """The Garmin account's timezone, by which its days and local times are counted."""
     try:
-        return str(auth.call("_user_tzinfo"))
+        return auth.call("get_user_timezone") or None
     except Exception:  # noqa: BLE001 -- a convenience, never worth failing for
         return None
 
