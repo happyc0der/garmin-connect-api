@@ -23,7 +23,7 @@ from garminconnect.workout import (
 )
 
 from .. import auth, catalogue
-from ..errors import GarminApiError, InvalidRequest, NotFound
+from ..errors import GarminApiError, GarminUnavailable, InvalidRequest, NotFound
 from ..models.common import as_date_str
 from ..models.health import DeviceSummary
 from ..models.workouts import (
@@ -96,10 +96,19 @@ def build_strength(spec: StrengthWorkoutSpec) -> dict[str, Any]:
 def create_strength(spec: StrengthWorkoutSpec) -> WorkoutSummary:
     """Create a strength workout, and schedule it if the spec says to."""
     payload = build_strength(spec)
-    created = auth.call("upload_workout", payload)
-    summary = WorkoutSummary.from_garmin(created or {}, include_raw=True)
+    summary = _created(auth.call("upload_workout", payload))
     _schedule_new(summary, spec.schedule_date)
     return summary
+
+
+def _created(reply: Any) -> WorkoutSummary:
+    """The workout Garmin says it created; without an id, nothing can be said to exist."""
+    if not isinstance(reply, dict) or not reply.get("workoutId"):
+        raise GarminUnavailable(
+            "Garmin did not return the new workout's id.",
+            detail="It may or may not have been created; list_workouts shows what exists.",
+        )
+    return WorkoutSummary.from_garmin(reply, include_raw=True)
 
 
 def _schedule_new(summary: WorkoutSummary, day: date | None) -> None:
@@ -124,8 +133,7 @@ def _schedule_new(summary: WorkoutSummary, day: date | None) -> None:
 
 def create_raw(workout_json: dict[str, Any]) -> WorkoutSummary:
     """Create a workout from a full Garmin DTO, for shapes the builder omits."""
-    created = auth.call("upload_workout", workout_json)
-    return WorkoutSummary.from_garmin(created or {}, include_raw=True)
+    return _created(auth.call("upload_workout", workout_json))
 
 
 def update(workout_id: int | str, workout_json: dict[str, Any]) -> Any:
@@ -445,7 +453,6 @@ def build_endurance(spec: EnduranceWorkoutSpec) -> dict[str, Any]:
 
 def create_endurance(spec: EnduranceWorkoutSpec) -> WorkoutSummary:
     """Create a run, ride or pool swim workout, and schedule it if asked."""
-    created = auth.call("upload_workout", build_endurance(spec))
-    summary = WorkoutSummary.from_garmin(created or {}, include_raw=True)
+    summary = _created(auth.call("upload_workout", build_endurance(spec)))
     _schedule_new(summary, spec.schedule_date)
     return summary

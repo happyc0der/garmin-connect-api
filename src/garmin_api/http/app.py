@@ -59,12 +59,25 @@ def refusal(headers: Mapping[str, str], method: str, path: str) -> JSONResponse 
       health check must present it, compared in constant time.
     """
     host_header = (headers.get("host") or "").strip().lower()
-    host = (urlsplit("//" + host_header).hostname or "") if host_header else ""
+    origin = headers.get("origin")
+    try:
+        # No scheme for the Host: without a port it takes the Origin's default.
+        host, host_port = _host_and_port(host_header, "")
+        site = urlsplit(origin.strip()) if origin is not None else None
+        origin_at = (
+            _host_and_port(site.netloc.lower(), site.scheme)
+            if site is not None and site.netloc
+            else None
+        )
+    except ValueError:
+        return JSONResponse(status_code=400, content={"error": "Malformed Host or Origin"})
     if host_header and host not in LOCAL_HOSTS | _extra_hosts():
         return JSONResponse(status_code=403, content={"error": "Forbidden host"})
 
-    origin = headers.get("origin")
-    foreign = origin is not None and urlsplit(origin.strip()).netloc.lower() != host_header
+    # Same host and port, with a scheme's default port filled in on both sides.
+    foreign = origin is not None and (
+        origin_at is None or origin_at != (host, host_port or origin_at[1])
+    )
     if foreign and method.upper() not in SAFE_METHODS:
         return JSONResponse(status_code=403, content={"error": "Cross-origin write refused"})
 
@@ -78,6 +91,17 @@ def refusal(headers: Mapping[str, str], method: str, path: str) -> JSONResponse 
     return None
 
 
+def _host_and_port(netloc: str, scheme: str) -> tuple[str, int | None]:
+    """A host and its port from "host[:port]"; raises ValueError when malformed."""
+    if not netloc:
+        return "", None
+    parts = urlsplit("//" + netloc)
+    port = parts.port  # raises ValueError for a port that is not a number
+    if port is None:
+        port = {"http": 80, "https": 443}.get(scheme)
+    return (parts.hostname or "").rstrip("."), port
+
+
 class RequestGuard:
     """ASGI middleware applying :func:`refusal`, for this app and the MCP HTTP server."""
 
@@ -86,6 +110,13 @@ class RequestGuard:
 
     async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
         if scope.get("type") == "http":
+            if b"%2f" in (scope.get("raw_path") or b"").lower():
+                # The server decodes %2F before routing, so an id such as
+                # "schedule%2F1" would reach a different route; no route here
+                # takes a slash inside a value.
+                slash = JSONResponse(status_code=400, content={"error": "Encoded slash in path"})
+                await slash(scope, receive, send)
+                return
             headers = {
                 k.decode("latin-1").lower(): v.decode("latin-1") for k, v in scope["headers"]
             }

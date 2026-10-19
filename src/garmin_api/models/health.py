@@ -11,9 +11,9 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Any
 
-from pydantic import Field, field_validator
+from pydantic import ConfigDict, Field, field_validator
 
-from .common import ApiModel, WriteSpec, first, parse_date, parse_dt
+from .common import ApiModel, WriteSpec, first, parse_date, parse_dt, within_fit_years
 
 
 class SleepSummary(ApiModel):
@@ -131,6 +131,10 @@ class DaySummary(ApiModel):
     not exist on that model, or Garmin may simply not have computed it yet.
     """
 
+    # Parts are filled in one by one after construction; each is checked as
+    # it lands, so a reply Garmin shaped oddly cannot break the output schema.
+    model_config = ConfigDict(populate_by_name=True, extra="ignore", validate_assignment=True)
+
     day: date
     steps: int | None = None
     step_goal: int | None = None
@@ -176,7 +180,7 @@ class DaySummary(ApiModel):
             resting_hr=first(stats, "restingHeartRate"),
             min_hr=first(stats, "minHeartRate"),
             max_hr=first(stats, "maxHeartRate"),
-            average_stress=first(stats, "averageStressLevel"),
+            average_stress=_reading(first(stats, "averageStressLevel")),
             body_battery_high=first(stats, "bodyBatteryHighestValue"),
             body_battery_low=first(stats, "bodyBatteryLowestValue"),
             raw=stats if include_raw else None,
@@ -221,6 +225,11 @@ class HrvSummary(ApiModel):
 STRESS_BANDS = (("rest", 0, 25), ("low", 26, 50), ("medium", 51, 75), ("high", 76, 100))
 
 
+def _reading(value: Any) -> Any:
+    """A stress level, or None for Garmin's negative codes: -1 and -2 mean no reading."""
+    return None if isinstance(value, (int, float)) and value < 0 else value
+
+
 class StressSummary(ApiModel):
     """A day of stress, as minutes in each of Garmin's bands.
 
@@ -232,11 +241,12 @@ class StressSummary(ApiModel):
     day: date | None = None
     average: int | None = None
     max: int | None = None
-    rest_minutes: int = 0
-    low_minutes: int = 0
-    medium_minutes: int = 0
-    high_minutes: int = 0
-    unmeasured_minutes: int = Field(
+    # None when the day has no samples to count.
+    rest_minutes: int | None = 0
+    low_minutes: int | None = 0
+    medium_minutes: int | None = 0
+    high_minutes: int | None = 0
+    unmeasured_minutes: int | None = Field(
         default=0, description="Off the wrist, or too much movement to read."
     )
     samples: list[list[Any]] | None = Field(
@@ -263,15 +273,16 @@ class StressSummary(ApiModel):
                     minutes[name] += interval_min
                     break
 
+        counted = bool(values)
         return cls(
             day=parse_date(payload.get("calendarDate")),
-            average=payload.get("avgStressLevel"),
-            max=payload.get("maxStressLevel"),
-            rest_minutes=round(minutes["rest"]),
-            low_minutes=round(minutes["low"]),
-            medium_minutes=round(minutes["medium"]),
-            high_minutes=round(minutes["high"]),
-            unmeasured_minutes=round(unmeasured),
+            average=_reading(payload.get("avgStressLevel")),
+            max=_reading(payload.get("maxStressLevel")),
+            rest_minutes=round(minutes["rest"]) if counted else None,
+            low_minutes=round(minutes["low"]) if counted else None,
+            medium_minutes=round(minutes["medium"]) if counted else None,
+            high_minutes=round(minutes["high"]) if counted else None,
+            unmeasured_minutes=round(unmeasured) if counted else None,
             samples=values if include_samples else None,
         )
 
@@ -404,4 +415,4 @@ class BodyCompositionSpec(WriteSpec):
     def _aware(cls, value: datetime) -> datetime:
         if value.tzinfo is None:
             raise ValueError("timestamp needs a timezone, or the weigh-in lands hours off")
-        return value
+        return within_fit_years(value)

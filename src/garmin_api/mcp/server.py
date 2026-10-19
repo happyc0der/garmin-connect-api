@@ -9,6 +9,7 @@ guidance a model needs but an HTTP caller does not.
 
 from __future__ import annotations
 
+import functools
 import os
 from datetime import date, timedelta
 from typing import Annotated, Any
@@ -16,10 +17,10 @@ from typing import Annotated, Any
 from fastmcp import FastMCP
 from fastmcp.server.providers.openapi import MCPType, RouteMap
 from mcp.types import ToolAnnotations
-from pydantic import Field
+from pydantic import Field, ValidationError
 
 from .. import __version__, auth, catalogue
-from ..errors import NotAuthenticated, RateLimited
+from ..errors import GarminUnavailable, InvalidRequest, NotAuthenticated, RateLimited
 from ..http.app import API_KEY_ENV, create_app
 from ..services import activities as activities_service
 
@@ -104,6 +105,17 @@ def _title(operation_id: str) -> str:
     return " ".join([first, *words[1:]]).replace("weigh in", "weigh-in")
 
 
+async def _drop_origin(request: Any) -> None:
+    """Keep an MCP client's Origin off the in-process call to the API.
+
+    FastMCP copies the client's headers onto it. Over HTTP the guard in front
+    of the MCP endpoint has already judged that Origin; the API inside would
+    compare it with its own host, 127.0.0.1 with no port, and refuse writes.
+    """
+    if "origin" in request.headers:
+        del request.headers["origin"]
+
+
 def create_mcp() -> FastMCP:
     app = create_app()
 
@@ -113,7 +125,10 @@ def create_mcp() -> FastMCP:
     # touches a network -- but FastMCP's default host, "fastapi", is one the
     # app's host guard rightly refuses.
     key = os.getenv(API_KEY_ENV)
-    client_kwargs: dict[str, Any] = {"base_url": "http://127.0.0.1"}
+    client_kwargs: dict[str, Any] = {
+        "base_url": "http://127.0.0.1",
+        "event_hooks": {"request": [_drop_origin]},
+    }
     if key:
         client_kwargs["headers"] = {"Authorization": f"Bearer {key}"}
 
@@ -184,6 +199,28 @@ def _guard_http(mcp: FastMCP) -> None:
     mcp.http_app = http_app  # type: ignore[method-assign,assignment]
 
 
+def _garmin_shaped(fn: Any) -> Any:
+    """Report a hand-written tool's failures as the generated ones are.
+
+    These tools call the services directly, so an oddly shaped Garmin reply
+    never reaches the HTTP app's handler, and FastMCP would report it as the
+    model's own invalid arguments. A date too far out is the caller's error.
+    """
+
+    @functools.wraps(fn)
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
+        try:
+            return fn(*args, **kwargs)
+        except ValidationError as exc:
+            raise GarminUnavailable(
+                "Garmin answered in a shape this package did not expect.", detail=str(exc)
+            ) from exc
+        except OverflowError as exc:
+            raise InvalidRequest("A date is out of range.", detail=str(exc)) from exc
+
+    return wrapper
+
+
 def _add_convenience_tools(mcp: FastMCP) -> None:
     """Tools that answer a question rather than mirror an endpoint."""
 
@@ -230,6 +267,7 @@ def _add_convenience_tools(mcp: FastMCP) -> None:
             open_world_hint=True,
         )
     )
+    @_garmin_shaped
     def recent_strength_sessions(
         count: Annotated[int, Field(ge=1, le=25)] = 5, include_sets: bool = True
     ) -> list[dict[str, Any]]:
@@ -277,6 +315,7 @@ def _add_convenience_tools(mcp: FastMCP) -> None:
             title="Week summary", read_only_hint=True, idempotent_hint=True, open_world_hint=True
         )
     )
+    @_garmin_shaped
     def week_summary(end_day: date | None = None) -> dict[str, Any]:
         """Seven days of training and health in one answer.
 

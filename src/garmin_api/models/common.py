@@ -26,7 +26,21 @@ class WriteSpec(ApiModel):
     a set saved as plain "Row" because the exercise came under another key.
     """
 
-    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+    # No infinities or NaN: JSON can carry them as 1e999, and a step a
+    # million miles long or an infinite speed is never meant.
+    model_config = ConfigDict(populate_by_name=True, extra="forbid", allow_inf_nan=False)
+
+
+# FIT counts time from 31 Dec 1989 in an unsigned 32-bit field, so a time
+# outside these years cannot be written to a file.
+EARLIEST = datetime(1990, 1, 1, tzinfo=UTC)
+LATEST = datetime(2100, 1, 1, tzinfo=UTC)
+
+
+def within_fit_years(value: datetime) -> datetime:
+    if value.tzinfo is not None and not EARLIEST <= value < LATEST:
+        raise ValueError("must fall between 1990 and 2099")
+    return value
 
 
 # The exercise search returns the variant as "exercise"; the write specs call
@@ -54,7 +68,10 @@ def parse_dt(value: Any) -> datetime | None:
     if isinstance(value, (int, float)):
         # Garmin sends milliseconds for activity timestamps.
         seconds = value / 1000 if value > 1e11 else float(value)
-        return datetime.fromtimestamp(seconds, tz=UTC)
+        try:
+            return datetime.fromtimestamp(seconds, tz=UTC)
+        except (ValueError, OverflowError, OSError):
+            return None
     text = str(value).strip().replace("Z", "+00:00")
     if " " in text and "T" not in text:
         text = text.replace(" ", "T", 1)

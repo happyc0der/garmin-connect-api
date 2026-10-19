@@ -58,7 +58,9 @@ def list_activities(
             rows = [r for r in rows if (r.get("activityType") or {}).get("typeKey") == subtype]
     else:
         rows = list(auth.call("get_activities", start, limit, parent, subtype) or [])
-    return [ActivitySummary.from_garmin(r, include_raw=include_raw) for r in rows]
+    return [
+        ActivitySummary.from_garmin(r, include_raw=include_raw) for r in rows if isinstance(r, dict)
+    ]
 
 
 def _activity_search_url() -> str:
@@ -130,7 +132,7 @@ def get_sets(
     the gaps.
     """
     payload = auth.call("get_activity_exercise_sets", activity_id)
-    if payload is None:
+    if not isinstance(payload, dict):
         raise NotFound(f"No exercise sets for activity {activity_id}.")
     parsed = ActivitySets.from_garmin(int(activity_id), payload, include_raw=include_raw)
     if not include_rests:

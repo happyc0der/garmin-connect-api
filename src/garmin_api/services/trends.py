@@ -52,6 +52,8 @@ def trend(
     end_d = date.fromisoformat(as_date_str(end))
     if end_d < start_d:
         raise InvalidRequest("The range ends before it starts.")
+    if start_d.year < 1990 or end_d.year > 2099:
+        raise InvalidRequest("Dates must fall between 1990 and 2099.")
     if (end_d - start_d).days + 1 > MAX_DAYS:
         raise InvalidRequest(
             f"Ranges are limited to {MAX_DAYS} days.",

@@ -56,6 +56,8 @@ def add_weigh_in(
             raise InvalidRequest(
                 f"Not a timestamp: {timestamp!r}.", detail="Use ISO 8601."
             ) from exc
+        if not 1990 <= moment.year <= 2099:
+            raise InvalidRequest("A weigh-in must fall between 1990 and 2099.")
         if moment.tzinfo is not None:
             # Garmin files a weigh-in under the local date and time it is
             # given, so an instant in UTC would land on the wrong evening's

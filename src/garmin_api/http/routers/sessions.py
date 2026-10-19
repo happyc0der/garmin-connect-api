@@ -97,7 +97,7 @@ def encode(spec: StrengthSessionSpec) -> Response:
 )
 async def decode(
     file: UploadFile = File(description="A .fit file, or the zip Garmin's export hands back."),
-    name: str = Query("Strength Training"),
+    name: str = Query("Strength Training", min_length=1, max_length=80),
 ) -> StrengthSessionSpec:
     """Read a strength session out of a FIT file.
 
