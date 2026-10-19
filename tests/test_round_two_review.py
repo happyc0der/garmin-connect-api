@@ -143,17 +143,21 @@ def test_creating_and_scheduling_returns_the_schedule(fake_garmin: dict[str, Any
 
 
 def test_change_is_the_movement_of_the_period_averages(fake_garmin: dict[str, Any]) -> None:
-    """Two weeks: averages rise by 1000 while the last day is far below the first."""
-    week_one = [10000] + [6666] * 6
-    week_two = [8000] * 6 + [-1]
+    """Two weeks: the weekly average rises while the last day is far below the first.
+
+    First day to last day would say steps fell by 9,000; the weeks say they rose.
+    """
+    week_one = [10000] + [5000] * 6  # averages 5,714.3
+    week_two = [7000] * 6 + [1000]  # averages 6,142.9
     days = [date(2026, 1, 5 + i) for i in range(14)]
     fake_garmin["responses"]["get_daily_steps"] = [
         {"calendarDate": d.isoformat(), "totalSteps": s}
-        for d, s in zip(days, week_one + week_two[:6] + [1000], strict=True)
+        for d, s in zip(days, week_one + week_two, strict=True)
     ]
     trend = trends.trend("steps", "2026-01-05", "2026-01-18", aggregation="week")
-    first, last = trend.summary["first_period_average"], trend.summary["last_period_average"]
-    assert trend.summary["change"] == round(last - first, 1)
+    assert trend.summary["first_period_average"] == 5714.3
+    assert trend.summary["last_period_average"] == 6142.9
+    assert trend.summary["change"] == 428.6
 
 
 # --- Garmin's shapes ------------------------------------------------------------

@@ -164,11 +164,38 @@ def test_a_weigh_in_given_in_utc_lands_on_the_local_day(fake_garmin: dict[str, A
     assert sent == [(72.4, "kg", "2026-10-18T22:00:00-04:00")]
 
 
-def test_a_weigh_in_with_no_offset_is_passed_on_as_local(fake_garmin: dict[str, Any]) -> None:
+def test_a_weigh_in_with_no_offset_is_the_accounts_local_time(fake_garmin: dict[str, Any]) -> None:
     sent: list[Any] = []
-    fake_garmin["responses"]["add_weigh_in"] = lambda *a: sent.append(a) or {}
+    fake_garmin["responses"].update(
+        {
+            "add_weigh_in": lambda *a: sent.append(a) or {},
+            "get_user_timezone": "America/New_York",
+        }
+    )
     weight.add_weigh_in(72.4, timestamp="2026-10-18T22:00:00")
-    assert sent == [(72.4, "kg", "2026-10-18T22:00:00")]
+    assert sent == [(72.4, "kg", "2026-10-18T22:00:00-04:00")]
+
+
+def test_a_weigh_in_with_no_offset_is_refused_when_the_zone_is_unknown(
+    fake_garmin: dict[str, Any],
+) -> None:
+    """The library would place it in the machine's timezone instead, silently."""
+    from garmin_api.errors import GarminUnavailable
+
+    fake_garmin["responses"].update({"add_weigh_in": {}, "get_user_timezone": None})
+    with pytest.raises(GarminUnavailable, match="timezone"):
+        weight.add_weigh_in(72.4, timestamp="2026-10-18T22:00:00")
+
+
+def test_a_weigh_in_with_its_offset_is_sent_as_given_when_the_zone_is_unknown(
+    fake_garmin: dict[str, Any],
+) -> None:
+    sent: list[Any] = []
+    fake_garmin["responses"].update(
+        {"add_weigh_in": lambda *a: sent.append(a) or {}, "get_user_timezone": None}
+    )
+    weight.add_weigh_in(72.4, timestamp="2026-10-18T07:30:00+05:30")
+    assert sent == [(72.4, "kg", "2026-10-18T07:30:00+05:30")]
 
 
 def test_a_failed_schedule_keeps_the_new_workouts_id(fake_garmin: dict[str, Any]) -> None:

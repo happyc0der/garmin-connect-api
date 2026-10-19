@@ -35,6 +35,9 @@ dependencies = [
     "typer>=0.15",
     # The upload routes take multipart forms; FastAPI needs this to parse them.
     "python-multipart>=0.0.20",
+    # Timezone names, on systems without their own database (Windows, slim
+    # Linux images): an account's timezone must be loadable to place times.
+    "tzdata>=2024.1",
 ]
 
 [project.urls]

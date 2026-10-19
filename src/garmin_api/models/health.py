@@ -161,6 +161,13 @@ class DaySummary(ApiModel):
     )
     sleep: SleepSummary | None = None
     weight: WeighIn | None = None
+    unavailable: dict[str, str] | None = Field(
+        default=None,
+        description=(
+            "Parts Garmin did not answer for, and why: a part missing from this summary is "
+            "listed here if it failed, rather than looking like a day with nothing recorded."
+        ),
+    )
     raw: dict[str, Any] | None = None
 
     @classmethod

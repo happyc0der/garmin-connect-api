@@ -124,11 +124,17 @@ def build(
                 lap.pace = pace_text(duration / (distance / unit_m) * 100, per)
         elif kind == "run":
             lap.cadence = _round(_num(raw.get("averageRunCadence")), 0)
-            if distance and duration:
-                lap.pace = pace_text(duration / distance * 1000, "km")
+            # On moving time, as the summary is: a lap with a stop in it must
+            # not read slower here and faster there.
+            moving = _num(raw.get("movingDuration")) or duration
+            if distance and moving:
+                lap.pace = pace_text(moving / distance * 1000, "km")
         else:
             lap.cadence = _round(_num(raw.get("averageBikeCadence")), 0)
-            if speed is not None:
+            moving = _num(raw.get("movingDuration")) or duration
+            if distance and moving:
+                lap.speed_kph = round(distance / moving * 3.6, 1)
+            elif speed is not None:
                 lap.speed_kph = round(speed * 3.6, 1)
         laps.append(lap)
 
@@ -236,6 +242,35 @@ def _pace_of(lengths: list[dict[str, Any]], unit_m: float, per: str) -> str | No
     return pace_text(duration / distance * 100, per) if distance else None
 
 
+def _halves(laps: list[Lap], moving: Any) -> tuple[tuple[float, float], tuple[float, float]]:
+    """Distance and moving time either side of the middle of the distance."""
+    total = sum(lap.distance_m or 0 for lap in laps)
+    middle = total / 2
+    first = [0.0, 0.0]
+    second = [0.0, 0.0]
+    covered = 0.0
+    for lap in laps:
+        d, t = lap.distance_m or 0.0, moving(lap)
+        before = min(max(middle - covered, 0.0), d)  # this lap's metres before the middle
+        share = before / d if d else 0.0
+        first[0] += before
+        first[1] += t * share
+        second[0] += d - before
+        second[1] += t * (1 - share)
+        covered += d
+    return (first[0], first[1]), (second[0], second[1])
+
+
+def _rate_of(distance: float, seconds: float, kind: str) -> str | float | None:
+    if not distance or not seconds:
+        return None
+    return (
+        pace_text(seconds / distance * 1000, "km")
+        if kind == "run"
+        else round(distance / seconds * 3.6, 1)
+    )
+
+
 def _laps_summary(laps: list[Lap], kind: str) -> dict[str, Any]:
     """Totals and halves on moving time, as Garmin's own averages are.
 
@@ -266,9 +301,11 @@ def _laps_summary(laps: list[Lap], kind: str) -> dict[str, Any]:
     key = "pace" if kind == "run" else "speed_kph"
     summary[f"average_{key}"] = rate(timed)
     if len(timed) >= 2:
-        half = len(timed) // 2
-        summary[f"first_half_{key}"] = rate(timed[:half])
-        summary[f"second_half_{key}"] = rate(timed[half:])
+        # Halves by distance, the lap across the middle shared between them:
+        # by lap count, a 9 km lap and a 1 km lap made a "second half" of 1 km.
+        first, second = _halves(timed, moving)
+        summary[f"first_half_{key}"] = _rate_of(*first, kind)
+        summary[f"second_half_{key}"] = _rate_of(*second, kind)
         by_rate = sorted(timed, key=lambda lap: moving(lap) / (lap.distance_m or 1))
         summary["fastest_lap"] = by_rate[0].lap
         summary["slowest_lap"] = by_rate[-1].lap

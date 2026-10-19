@@ -66,8 +66,11 @@ def refusal(
     host_header = (headers.get("host") or "").strip().lower()
     origin = headers.get("origin")
     try:
-        # A Host without a port means this request's own scheme's default.
-        host, host_port = _host_and_port(host_header, scheme)
+        host, host_port = _host_and_port(host_header, "")
+        if host_port is None and host in LOCAL_HOSTS:
+            # A local name without a port is this request's own scheme's
+            # default: an https page is not this plain http service.
+            host_port = {"http": 80, "https": 443}.get(scheme)
         site = urlsplit(origin.strip()) if origin is not None else None
         origin_at = (
             _host_and_port(site.netloc.lower(), site.scheme)
@@ -87,6 +90,9 @@ def refusal(
 
     # Same host and port. A Host without a port means the Origin scheme's
     # default port, not whatever port the Origin names.
+    # A name from GARMIN_API_HOSTS without a port is usually behind a proxy
+    # that ends TLS, where this service sees http however the page was
+    # served; the Origin scheme's default port is the one to expect.
     default = {"http": 80, "https": 443}.get(site.scheme) if site is not None else None
     expected_port = host_port if host_port is not None else default
     foreign = origin is not None and (origin_at is None or origin_at != (host, expected_port))

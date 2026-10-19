@@ -34,6 +34,7 @@ from .errors import (
     NotAuthenticated,
     NotFound,
     RateLimited,
+    Withheld,
 )
 
 logger = logging.getLogger(__name__)
@@ -162,6 +163,9 @@ REFUSAL_HOLD_S = 600
 # After Garmin rate limits a connect, how long every call waits before trying.
 RATE_LIMIT_COOLDOWN_S = 60
 
+# After a connect fails to reach Garmin, how long calls fail at once.
+UNREACHABLE_HOLD_S = 15
+
 
 def translate(exc: Exception) -> Exception:
     """Map a library or transport exception onto this package's vocabulary.
@@ -197,7 +201,7 @@ def translate(exc: Exception) -> Exception:
         if str(exc) == "Authentication error" and _status_of(exc) is None:
             # The library's words, and only its words, for a reply Garmin
             # marked privacyProtected: the data is withheld, the login fine.
-            return NotFound(
+            return Withheld(
                 "Garmin marks this data private and did not return it.",
                 detail="The account's privacy settings withhold it; the login is fine.",
             )
@@ -270,6 +274,7 @@ class Session:
         # than each trying it again, until a new login replaces it.
         self._refused: tuple[str | None, int, float] | None = None
         self._cooling_until = 0.0
+        self._unreachable_until = 0.0
         self._lock = threading.RLock()
 
     @property
@@ -303,6 +308,12 @@ class Session:
                     "Garmin is rate limiting this account.",
                     detail="Wait before trying again. Do not retry in a loop.",
                 )
+            if time.monotonic() < self._unreachable_until:
+                # Every part of a day summary would otherwise connect again.
+                raise GarminUnavailable(
+                    "Could not reach Garmin Connect.",
+                    detail="The stored login is probably fine; try again shortly.",
+                )
             if self._held():
                 raise NotAuthenticated(
                     "Garmin rejected the stored credentials.",
@@ -311,16 +322,19 @@ class Session:
             # Read before building: a login landing while this one builds is
             # then seen as new on the next call, not taken for these tokens.
             marker = _login_marker(self._tokens)
+            before = self._stored()
             client = Garmin()
             try:
                 client.login(tokenstore=str(self._tokens))
             except Exception as exc:  # noqa: BLE001 -- re-raised as our own type
                 if _refusal(exc):
-                    self._hold()
+                    self._refused = (*before, time.monotonic())
                 error = translate(exc)
                 if isinstance(error, RateLimited):
                     # Calls queued behind this one would each try again.
                     self._cooling_until = time.monotonic() + RATE_LIMIT_COOLDOWN_S
+                elif isinstance(error, GarminUnavailable):
+                    self._unreachable_until = time.monotonic() + UNREACHABLE_HOLD_S
                 raise error from exc
             # The library loads the profile's timezone on first use, without a
             # lock, and a caller racing that load gets the machine's timezone.
@@ -331,11 +345,6 @@ class Session:
             self._client_login = marker
             self._refused = None
             return client
-
-    def _hold(self) -> None:
-        import time
-
-        self._refused = (*self._stored(), time.monotonic())
 
     def _held(self) -> bool:
         """Whether the tokens on disk are ones Garmin refused within the hold."""
@@ -452,7 +461,18 @@ def account_zone() -> Any:
     The library falls back to the machine's timezone when it cannot read the
     profile, which on a server in UTC would file a morning session hours out.
     """
-    from zoneinfo import ZoneInfo
+    zone = account_zone_or_none()
+    if zone is None:
+        raise GarminUnavailable(
+            "Could not read the Garmin account's timezone.",
+            detail="Give the time with its UTC offset, or try again shortly.",
+        )
+    return zone
+
+
+def account_zone_or_none() -> Any:
+    """The Garmin account's timezone, or None if Garmin did not say."""
+    from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
     name = call("get_user_timezone")
     if not name:
@@ -460,15 +480,17 @@ def account_zone() -> Any:
         inner = session()._client
         if inner is not None and hasattr(inner, "_time_zone_loaded"):
             inner._time_zone_loaded = False
-    if name:
-        try:
-            return ZoneInfo(name)
-        except Exception:  # noqa: BLE001 -- an unknown or malformed zone name
-            logger.debug("Garmin gave an unknown timezone: %r", name)
-    raise GarminUnavailable(
-        "Could not read the Garmin account's timezone.",
-        detail="Give the time with its UTC offset, or try again shortly.",
-    )
+        return None
+    try:
+        return ZoneInfo(name)
+    except ZoneInfoNotFoundError as exc:
+        raise GarminUnavailable(
+            f"The account's timezone, {name}, is not in this machine's timezone database.",
+            detail="Install the tzdata package, or give times with their UTC offset.",
+        ) from exc
+    except ValueError:  # a malformed name
+        logger.debug("Garmin gave an unusable timezone: %r", name)
+        return None
 
 
 def call(fn_name: str, *args: Any, **kwargs: Any) -> Any:
