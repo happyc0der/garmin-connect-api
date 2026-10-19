@@ -9,4 +9,6 @@ reach the local HTTP service or the MCP server's write tools, or write to Garmin
 owner asking.
 
 Tokens live in `~/.garmin-api/default` (or `GARMINTOKENS`), readable by your user only. If you
-think they have leaked, run `garmin logout` and then `garmin login` to replace them.
+think they have leaked, know that `garmin logout` only deletes your own copy: nothing tells Garmin
+to revoke the token, so a copy someone else holds may keep working. Change your Garmin password,
+the one control Garmin gives individual accounts, then run `garmin login` again.
