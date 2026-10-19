@@ -86,12 +86,52 @@ def test_records_with_no_date_come_last(fake_garmin: dict[str, Any], monkeypatch
     assert [r.record_id for r in health.records()] == [10, 11, 12]
 
 
-def test_steps_are_unknown_not_zero_when_garmin_fails(fake_garmin: dict[str, Any]) -> None:
+def test_an_outage_on_steps_is_an_error_not_zero(fake_garmin: dict[str, Any]) -> None:
+    """Asked for one metric alone, an outage must not look like a day of no steps."""
+    from garmin_api.errors import GarminUnavailable
+
     def outage(*_: Any) -> Any:
-        raise RuntimeError("503")
+        raise GarminUnavailable("Garmin answered with a server error (503).")
 
     fake_garmin["responses"]["get_steps_data"] = outage
-    assert health.steps_summary("2026-01-01").total is None
+    with pytest.raises(GarminUnavailable):
+        health.steps_summary("2026-01-01")
+
+
+@pytest.mark.parametrize(
+    ("path", "method"),
+    [
+        ("/v1/health/sleep/2026-10-18", "get_sleep_data"),
+        ("/v1/health/hrv/2026-10-18", "get_hrv_data"),
+        ("/v1/health/stress/2026-10-18", "get_stress_data"),
+        ("/v1/health/training-readiness/2026-10-18", "get_training_readiness"),
+        ("/v1/health/records", "get_personal_record"),
+    ],
+)
+def test_an_outage_on_one_metric_is_a_502_not_no_data(
+    fake_garmin: dict[str, Any], path: str, method: str
+) -> None:
+    from fastapi.testclient import TestClient
+
+    from garmin_api.errors import GarminUnavailable
+    from garmin_api.http.app import create_app
+
+    def outage(*_: Any) -> Any:
+        raise GarminUnavailable("Garmin answered with a server error (503).")
+
+    fake_garmin["responses"].update({method: outage, "get_personal_record_types": []})
+    assert TestClient(create_app()).get(path).status_code == 502
+
+
+def test_an_outage_on_one_part_leaves_the_rest_of_the_day(fake_garmin: dict[str, Any]) -> None:
+    from garmin_api.errors import GarminUnavailable
+
+    def outage(*_: Any) -> Any:
+        raise GarminUnavailable("Garmin answered with a server error (503).")
+
+    fake_garmin["responses"].update({"get_stats": {"totalSteps": 9000}, "get_sleep_data": outage})
+    summary = health.day("2026-01-01", parts={"stats", "sleep"})
+    assert (summary.steps, summary.sleep) == (9000, None)
 
 
 def test_a_rate_limit_on_steps_still_stops(fake_garmin: dict[str, Any]) -> None:
@@ -173,7 +213,8 @@ def test_a_range_given_either_way_round_is_put_in_order(given, expected) -> None
     [
         {"pace_per_km": ("0:00", "0:00")},
         {"pace_per_km": ("5:75", "5:00")},
-        {"heart_rate_bpm": (0, 150)},
+        {"heart_rate_bpm": (-5, 150)},
+        {"power_watts": (0, 0)},
     ],
 )
 def test_an_impossible_target_is_refused_by_the_spec(given) -> None:
@@ -262,3 +303,8 @@ def test_long_ranges_are_fetched_within_garmins_limits(
     trends.trend(metric, start, end)
     covered = [s + timedelta(days=i) for s, e in calls for i in range((e - s).days + 1)]
     assert covered == [start + timedelta(days=i) for i in range(days)]
+
+
+def test_a_target_range_may_start_at_zero() -> None:
+    """0.2.0 accepted "up to 90 rpm" as (0, 90); 0.2.1 briefly refused it."""
+    assert Target(cadence=(0, 90)).cadence == (0, 90)

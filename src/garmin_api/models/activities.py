@@ -203,6 +203,8 @@ class ActivitySets(ApiModel):
         sets: list[StrengthSet] = []
         number = 0
         for row in payload.get("exerciseSets") or []:
+            if not isinstance(row, dict):
+                continue
             rest = str(row.get("setType") or "").upper() == "REST"
             if not rest:
                 number += 1

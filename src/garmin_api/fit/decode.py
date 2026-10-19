@@ -12,13 +12,14 @@ from __future__ import annotations
 
 import io
 import zipfile
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta, timezone
 from typing import Any
 
 from fit_tool.fit_file import FitFile
 from fit_tool.profile.messages.session_message import SessionMessage
 from fit_tool.profile.messages.set_message import SetMessage
 from fit_tool.profile.profile_type import SetType
+from pydantic import ValidationError
 
 from ..errors import InvalidRequest
 from ..models.workouts import (
@@ -86,6 +87,17 @@ def field_value(message: Any, name: str) -> Any:
 
 
 def decode_strength_session(data: bytes, *, name: str = "Strength Training") -> StrengthSessionSpec:
+    """Decode FIT bytes into a strength session; values out of range are the file's fault."""
+    try:
+        return _decode(data, name)
+    except ValidationError as exc:
+        problems = "; ".join(
+            f"{'.'.join(str(p) for p in e['loc'])}: {e['msg']}" for e in exc.errors()[:5]
+        )
+        raise InvalidRequest("The FIT file holds values out of range.", detail=problems) from exc
+
+
+def _decode(data: bytes, name: str) -> StrengthSessionSpec:
     """Decode FIT bytes into a strength session.
 
     Consecutive sets of the same exercise are grouped back into one exercise,
@@ -105,8 +117,10 @@ def decode_strength_session(data: bytes, *, name: str = "Strength Training") -> 
         ),
         None,
     )
+    zone = _zone(messages)
     exercises: list[StrengthSessionExercise] = []
     last_working: StrengthSessionSet | None = None
+    last_end: float | None = None
     awaiting_rest = False
 
     for message in messages:
@@ -121,25 +135,30 @@ def decode_strength_session(data: bytes, *, name: str = "Strength Training") -> 
         if value == SetType.REST.value:
             # A rest belongs to the set before it.
             duration = field_value(message, "duration")
-            if last_working is not None and duration:
+            if last_working is not None and duration is not None:
                 last_working.rest_s = float(duration)
             awaiting_rest = False
             continue
 
         category_value = _first_value(message.category)
         subtype_value = _first_value(message.category_subtype)
-        if category_value is None or category_value == 0xFFFF:
-            continue
         if subtype_value == 0xFFFF:
             subtype_value = None
+        starts = field_value(message, "start_time")
 
         if last_working is not None and awaiting_rest:
-            # Straight into the next set: no rest, which is not the same as
-            # an unrecorded one, and re-encoding must not invent one.
-            last_working.rest_s = 0.0
+            # No rest message: the time between the sets, if the file says, or
+            # none. Not an unrecorded rest, which re-encoding would fill in.
+            gap = (starts - last_end) / 1000 if starts is not None and last_end is not None else 0
+            last_working.rest_s = round(max(gap, 0.0), 3)
 
-        category = fx.category_name(int(category_value)) or "UNKNOWN"
-        exercise_name = fx.exercise_name(int(category_value), subtype_value) or ""
+        # A set the watch could not identify is kept, as UNKNOWN, rather than
+        # dropped: dropping it lost the set and gave its rest to the one before.
+        known = category_value is not None and category_value != 0xFFFF
+        category = (fx.category_name(int(category_value)) if known else None) or "UNKNOWN"
+        exercise_name = (
+            fx.exercise_name(int(category_value), subtype_value) if known else ""
+        ) or ""
 
         reps = field_value(message, "repetitions")
         weight = field_value(message, "weight")
@@ -151,6 +170,11 @@ def decode_strength_session(data: bytes, *, name: str = "Strength Training") -> 
         )
         last_working = entry
         awaiting_rest = True
+        last_end = (
+            starts + entry.duration_s * 1000
+            if starts is not None and entry.duration_s is not None
+            else None
+        )
 
         if (
             exercises
@@ -174,11 +198,32 @@ def decode_strength_session(data: bytes, *, name: str = "Strength Training") -> 
             detail="Only strength activities carry set messages; a run or ride has none.",
         )
 
+    started = start or datetime.now(tz=UTC)
     return StrengthSessionSpec(
         name=name,
-        start_time=start or datetime.now(tz=UTC),
+        # In the session's own timezone, so encoding it again keeps the local time.
+        start_time=started.astimezone(zone) if zone else started,
         exercises=exercises,
     )
+
+
+def _zone(messages: list[Any]) -> timezone | None:
+    """The file's UTC offset: the activity's local timestamp minus its UTC one."""
+    from fit_tool.profile.messages.activity_message import ActivityMessage
+
+    from .encode import FIT_EPOCH_OFFSET
+
+    for message in messages:
+        if not isinstance(message, ActivityMessage):
+            continue
+        local, stamp = field_value(message, "local_timestamp"), field_value(message, "timestamp")
+        if local is None or stamp is None:
+            return None
+        # Rounded to the minute: offsets are whole minutes, and older files
+        # could be a second out.
+        offset = round((local - (stamp / 1000 - FIT_EPOCH_OFFSET)) / 60) * 60
+        return timezone(timedelta(seconds=offset)) if abs(offset) <= 14 * 3600 else None
+    return None
 
 
 def _first_value(value: Any) -> Any:

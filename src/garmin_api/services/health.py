@@ -13,7 +13,7 @@ from datetime import date
 from typing import Any
 
 from .. import auth
-from ..errors import NotAuthenticated, RateLimited
+from ..errors import NotAuthenticated, NotFound, RateLimited
 from ..models.common import as_date_str
 from ..models.health import (
     DaySummary,
@@ -48,6 +48,29 @@ def _safe(fn_name: str, *args: Any) -> Any:
         return None
 
 
+def _get(fn_name: str, *args: Any) -> Any:
+    """Call an endpoint for one metric: nothing recorded is None, any failure is raised.
+
+    Asked for one metric alone, an outage must not look like a night without
+    sleep; only Garmin's "not found" means there is nothing to report.
+    """
+    try:
+        return auth.call(fn_name, *args)
+    except NotFound:
+        return None
+
+
+def _tolerant(fn: Any, *args: Any, **kwargs: Any) -> Any:
+    """One part of the day summary: a failure leaves that part empty, as _safe does."""
+    try:
+        return fn(*args, **kwargs)
+    except (NotAuthenticated, RateLimited):
+        raise
+    except Exception as exc:  # noqa: BLE001 -- deliberately tolerant
+        logger.debug("%s failed, leaving it out of the day: %s", fn.__name__, exc)
+        return None
+
+
 def stats(day: date | str) -> Any:
     return auth.call("get_stats", as_date_str(day))
 
@@ -58,7 +81,7 @@ def sleep(day: date | str, *, include_raw: bool = False) -> SleepSummary | None:
     Garmin answers a night with no data with a full skeleton of nulls, which
     is reported as None rather than as a summary of nothing.
     """
-    payload = _safe("get_sleep_data", as_date_str(day))
+    payload = _get("get_sleep_data", as_date_str(day))
     if not payload:
         return None
     summary = SleepSummary.from_garmin(payload, include_raw=include_raw)
@@ -68,44 +91,44 @@ def sleep(day: date | str, *, include_raw: bool = False) -> SleepSummary | None:
 
 
 def hrv(day: date | str) -> Any:
-    return _safe("get_hrv_data", as_date_str(day))
+    return _get("get_hrv_data", as_date_str(day))
 
 
 def resting_hr(day: date | str) -> Any:
-    return _safe("get_rhr_day", as_date_str(day))
+    return _get("get_rhr_day", as_date_str(day))
 
 
 def stress(day: date | str) -> Any:
-    return _safe("get_stress_data", as_date_str(day))
+    return _get("get_stress_data", as_date_str(day))
 
 
 def body_battery(start: date | str, end: date | str | None = None) -> Any:
-    return _safe("get_body_battery", as_date_str(start), as_date_str(end) if end else None)
+    return _get("get_body_battery", as_date_str(start), as_date_str(end) if end else None)
 
 
 def steps(day: date | str) -> Any:
-    return _safe("get_steps_data", as_date_str(day))
+    return _get("get_steps_data", as_date_str(day))
 
 
 def training_readiness(day: date | str) -> Any:
-    return _safe("get_training_readiness", as_date_str(day))
+    return _get("get_training_readiness", as_date_str(day))
 
 
 def training_status(day: date | str) -> Any:
-    return _safe("get_training_status", as_date_str(day))
+    return _get("get_training_status", as_date_str(day))
 
 
 def heart_rates(day: date | str) -> Any:
-    return _safe("get_heart_rates", as_date_str(day))
+    return _get("get_heart_rates", as_date_str(day))
 
 
 def max_metrics(day: date | str) -> Any:
     """VO2 max and fitness age, as Garmin computes them."""
-    return _safe("get_max_metrics", as_date_str(day))
+    return _get("get_max_metrics", as_date_str(day))
 
 
 def personal_records() -> Any:
-    return _safe("get_personal_record")
+    return _get("get_personal_record")
 
 
 DAY_PARTS = frozenset({"stats", "sleep", "hrv", "readiness", "weight"})
@@ -136,17 +159,17 @@ def day(
     summary = DaySummary.from_stats(parsed_day, base, include_raw=include_raw)
 
     if "sleep" in parts:
-        summary.sleep = sleep(day_str, include_raw=include_raw)
+        summary.sleep = _tolerant(sleep, day_str, include_raw=include_raw)
 
     if "hrv" in parts:
-        hrv_payload = hrv(day_str) or {}
+        hrv_payload = _tolerant(hrv, day_str) or {}
         hrv_part = hrv_payload.get("hrvSummary") if isinstance(hrv_payload, dict) else None
         if isinstance(hrv_part, dict):
             summary.hrv_last_night_avg = hrv_part.get("lastNightAvg")
             summary.hrv_status = hrv_part.get("status")
 
     if "readiness" in parts:
-        readiness = training_readiness(day_str)
+        readiness = _tolerant(training_readiness, day_str)
         # A list of snapshots, or, on some accounts, a single snapshot object.
         snapshots = readiness if isinstance(readiness, list) else [readiness] if readiness else []
         morning = morning_readiness(snapshots)

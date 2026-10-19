@@ -18,7 +18,15 @@ from typing import Annotated, Any, Literal
 
 from pydantic import AliasChoices, Discriminator, Field, Tag, field_validator, model_validator
 
-from .common import EXERCISE_NAME_KEYS, ApiModel, WriteSpec, first, parse_date, parse_dt
+from .common import (
+    EXERCISE_NAME_KEYS,
+    ApiModel,
+    WriteSpec,
+    first,
+    parse_date,
+    parse_dt,
+    within_fit_years,
+)
 
 
 class WorkoutSummary(ApiModel):
@@ -184,7 +192,7 @@ class StrengthSessionSpec(WriteSpec):
         # session in New York would land in Garmin at 3am.
         if value.tzinfo is None:
             raise ValueError("start_time needs a timezone offset, e.g. 2026-09-21T07:00:00-04:00")
-        return value
+        return within_fit_years(value)
 
     @property
     def total_sets(self) -> int:
@@ -246,8 +254,8 @@ class Target(WriteSpec):
         for name in ("speed_kph", "heart_rate_bpm", "power_watts", "cadence"):
             value = getattr(self, name)
             if value is not None:
-                if min(value) <= 0:
-                    raise ValueError(f"{name} must be above zero, got {list(value)}")
+                if min(value) < 0 or max(value) <= 0:
+                    raise ValueError(f"{name} must not be negative or all zero, got {list(value)}")
                 setattr(self, name, tuple(sorted(value)))
         return self
 
@@ -268,7 +276,7 @@ class EnduranceStep(WriteSpec):
 
     kind: StepKind = "interval"
     duration_s: float | None = Field(default=None, gt=0, le=86400)
-    distance: float | None = Field(default=None, gt=0)
+    distance: float | None = Field(default=None, gt=0, le=1_000_000)
     distance_unit: Literal["m", "km", "mi", "yd"] = "m"
     lap_button: bool = False
     target: Target | None = None

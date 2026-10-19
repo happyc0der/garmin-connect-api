@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import Field
+from pydantic import ConfigDict, Field
 
 from .common import ApiModel
 
@@ -28,6 +28,9 @@ def pace_text(seconds: float | None, per: str) -> str | None:
 
 
 class Lap(ApiModel):
+    # Swim and run fields are set after construction; checked as they land.
+    model_config = ConfigDict(populate_by_name=True, extra="ignore", validate_assignment=True)
+
     lap: int
     distance_m: float | None = None
     duration_s: float | None = None

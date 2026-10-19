@@ -11,12 +11,14 @@ from __future__ import annotations
 import hashlib
 from datetime import UTC, datetime
 
+from fit_tool.exceptions import FitEncodingError
 from fit_tool.fit_file_builder import FitFileBuilder
 from fit_tool.profile.messages.device_info_message import DeviceInfoMessage
 from fit_tool.profile.messages.file_creator_message import FileCreatorMessage
 from fit_tool.profile.messages.file_id_message import FileIdMessage
 from fit_tool.profile.messages.weight_scale_message import WeightScaleMessage
 from fit_tool.profile.profile_type import FileType, Manufacturer
+from pydantic import ValidationError
 
 from ..errors import InvalidRequest
 from ..models.health import BodyCompositionSpec
@@ -48,12 +50,24 @@ def measurement_serial(spec: BodyCompositionSpec) -> int:
 
     The same weigh-in always encodes to the same file, so a sync that runs
     twice is caught by Garmin's duplicate check instead of logging it twice.
+    Hashed from the file itself, so the same instant written in another
+    timezone, or a value past FIT's precision, is the same weigh-in.
     """
-    digest = hashlib.sha256(spec.model_dump_json().encode()).digest()
+    digest = hashlib.sha256(encode_body_composition(spec, serial=1)).digest()
     return (int.from_bytes(digest[:4], "big") & 0x7FFFFFFF) or 1
 
 
 def encode_body_composition(spec: BodyCompositionSpec, *, serial: int | None = None) -> bytes:
+    """A weigh-in as a FIT weight-scale file; a value FIT cannot hold is the request's fault."""
+    try:
+        return _encode(spec, serial)
+    except FitEncodingError as exc:
+        raise InvalidRequest(
+            "This weigh-in cannot be written as a FIT file.", detail=str(exc)
+        ) from exc
+
+
+def _encode(spec: BodyCompositionSpec, serial: int | None) -> bytes:
     stamp = _ms(spec.timestamp)
     serial_number = serial if serial is not None else measurement_serial(spec)
     builder = FitFileBuilder(auto_define=True)
@@ -106,7 +120,12 @@ def decode_body_composition(data: bytes) -> list[BodyCompositionSpec]:
         for key, value in values.items():
             if isinstance(value, float):
                 values[key] = round(value, 2)
-        found.append(BodyCompositionSpec.model_validate(values))
+        try:
+            found.append(BodyCompositionSpec.model_validate(values))
+        except ValidationError as exc:
+            raise InvalidRequest(
+                "The FIT file holds a weigh-in out of range.", detail=str(exc.errors()[:3])
+            ) from exc
     if not found:
         raise InvalidRequest("No weigh-ins found in this FIT file.")
     return found

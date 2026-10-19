@@ -349,8 +349,10 @@ def serve(host: str = "127.0.0.1", port: int = 8765, reload: bool = False) -> No
 @app.command()
 def mcp(
     http: bool = typer.Option(False, help="Serve over HTTP instead of stdio."),
-    host: str = typer.Option("127.0.0.1", help="With --http: the address to bind."),
-    port: int = typer.Option(8000, help="With --http: the port."),
+    host: str = typer.Option(
+        "127.0.0.1", envvar="FASTMCP_HOST", help="With --http: the address to bind."
+    ),
+    port: int = typer.Option(8000, envvar="FASTMCP_PORT", help="With --http: the port."),
 ) -> None:
     """Run the MCP server.
 

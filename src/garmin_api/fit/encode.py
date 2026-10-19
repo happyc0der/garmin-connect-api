@@ -23,6 +23,7 @@ from __future__ import annotations
 import hashlib
 from datetime import UTC, datetime, timedelta
 
+from fit_tool.exceptions import FitEncodingError
 from fit_tool.fit_file_builder import FitFileBuilder
 from fit_tool.profile.messages.activity_message import ActivityMessage
 from fit_tool.profile.messages.event_message import EventMessage
@@ -43,6 +44,7 @@ from fit_tool.profile.profile_type import (
     SubSport,
 )
 
+from ..errors import InvalidRequest
 from ..models.workouts import StrengthSessionSpec
 from . import exercises as fx
 
@@ -74,7 +76,9 @@ def _fit_local_seconds(moment: datetime) -> int:
     if moment.tzinfo is None:
         moment = moment.replace(tzinfo=UTC)
     offset = moment.utcoffset() or timedelta(0)
-    return int(moment.timestamp() - FIT_EPOCH_OFFSET + offset.total_seconds())
+    # Rounded as fit-tool rounds the UTC timestamp, so the two differ by
+    # exactly the offset.
+    return round(moment.timestamp()) - FIT_EPOCH_OFFSET + round(offset.total_seconds())
 
 
 def _record(moment: datetime) -> RecordMessage:
@@ -98,6 +102,20 @@ def session_serial(spec: StrengthSessionSpec) -> int:
 
 
 def encode_strength_session(spec: StrengthSessionSpec, *, serial: int | None = None) -> bytes:
+    """Encode a completed strength session as FIT bytes; see :func:`_encode`.
+
+    fit-tool checks each value's range as it is set, so a session too long
+    for FIT's fields fails partway; that is reported as the request's fault.
+    """
+    try:
+        return _encode(spec, serial)
+    except FitEncodingError as exc:
+        raise InvalidRequest(
+            "This session cannot be written as a FIT file.", detail=str(exc)
+        ) from exc
+
+
+def _encode(spec: StrengthSessionSpec, serial: int | None) -> bytes:
     """Encode a completed strength session as FIT bytes.
 
     ``serial`` is the file's serial number. By default it is derived from the
@@ -175,7 +193,7 @@ def encode_strength_session(spec: StrengthSessionSpec, *, serial: int | None = N
             rest_s = (
                 entry.rest_s if entry.rest_s is not None else (0.0 if is_final else DEFAULT_REST_S)
             )
-            if rest_s > 0:
+            if round(rest_s * 1000) > 0:  # FIT keeps milliseconds
                 builder.add(_record(cursor))
                 rest = SetMessage()
                 rest.message_index = message_index

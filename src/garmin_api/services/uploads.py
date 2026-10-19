@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from .. import auth, catalogue
-from ..errors import Duplicate, InvalidRequest
+from ..errors import Duplicate, InvalidRequest, NotAuthenticated, RateLimited
 from ..fit import encode_strength_session
 from ..models.workouts import StrengthSessionSpec
 
@@ -95,8 +95,17 @@ def log_strength_session(
 
     data = encode_strength_session(spec, serial=serial)
     # Anything already starting at this instant, such as the watch's own
-    # recording or an earlier log of the session, is not the new upload.
-    already_there = set(_ids_starting_at(spec))
+    # recording or an earlier log of the session, is not the new upload. If
+    # that cannot be read, the upload still goes ahead, but an "accepted"
+    # reply is then left as it is rather than guessed at.
+    already_there: set[int] | None
+    try:
+        already_there = set(_ids_starting_at(spec))
+    except (NotAuthenticated, RateLimited):
+        raise
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Could not list activities before uploading: %s", exc)
+        already_there = None
 
     with tempfile.TemporaryDirectory() as tmp:
         # The filename becomes the activity's name on Garmin's side, so it is
@@ -107,7 +116,8 @@ def log_strength_session(
         result = upload_file(target)
 
     activity_id = result.get("activity_id")
-    if activity_id is None and result.get("status") in ("accepted", "processed"):
+    found_later = already_there is not None
+    if activity_id is None and found_later and result.get("status") in ("accepted", "processed"):
         # Garmin often accepts an activity file and processes it afterwards,
         # answering with neither a success nor a failure. Found live: the
         # activity appeared moments later. The session's own start time is

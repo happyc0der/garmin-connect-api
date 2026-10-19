@@ -66,7 +66,12 @@ ALIASES = {
     "skull crusher": "lying triceps extension",
     "skullcrusher": "lying triceps extension",
     "chinup": "chin up",
+    "pushdown": "press down",
 }
+
+# Words that may be missing from a name given elsewhere without making it a
+# different lift: "Hack Squat" is the catalogue's "Barbell Hack Squat".
+IMPLEMENTS = frozenset({"barbell", "dumbbell", "kettlebell"})
 
 
 def _words(value: str) -> list[str]:
@@ -77,18 +82,26 @@ def _words(value: str) -> list[str]:
 
 
 def _stems(token: str) -> list[str]:
-    """What a query word may stand for, plurals undone: "presses" -> "press"."""
-    stems = [token]
+    """What a plural query word may stand for: "presses" -> "press", "flies" -> "fly"."""
+    stems = []
+    if len(token) >= 5 and token.endswith("ies"):
+        stems.append(token[:-3] + "y")
+    # "es" is a plural ending only after a hissing sound, or in "flyes": the
+    # "es" of "toes" or "lunges" is not, and stripping it would find "to".
+    if token.endswith(("sses", "shes", "ches", "xes", "zes", "yes")):
+        stems.append(token[:-2])
     if len(token) >= 3 and token.endswith("s"):
         stems.append(token[:-1])
-    if len(token) >= 4 and token.endswith("es"):
-        stems.append(token[:-2])
     return stems
 
 
 def _singular(word: str) -> str:
-    """One word's singular, for looking up aliases: "crushers" -> "crusher"."""
-    if word.endswith(("ches", "shes", "sses", "xes")):
+    """One word's singular, for comparing names: "crushers" -> "crusher"."""
+    if len(word) >= 5 and word.endswith("ies"):
+        return word[:-3] + "y"
+    if word.endswith(("ches", "shes", "sses", "xes", "zes")) or (
+        len(word) >= 5 and word.endswith("yes")
+    ):
         return word[:-2]
     if len(word) > 3 and word.endswith("s") and not word.endswith("ss"):
         return word[:-1]
@@ -96,8 +109,15 @@ def _singular(word: str) -> str:
 
 
 def _starts(word: str, token: str) -> bool:
-    """A query word starts a name word, tolerating a plural: "dips" finds "Dip"."""
-    return any(word.startswith(stem) for stem in _stems(token))
+    """A query word starts a name word, or is its plural: "dips" finds "Dip".
+
+    Only the word as typed may match the start of a name word. A stem with
+    its plural ending taken off must be the whole word, or "flies" would
+    find "Flip".
+    """
+    return word.startswith(token) or any(
+        word == stem or _singular(word) == stem for stem in _stems(token)
+    )
 
 
 def _query_tokens(term: str) -> list[str]:
@@ -117,13 +137,19 @@ def _ranked(term: str) -> list[tuple[int, Exercise]]:
     tokens = _query_tokens(term)
     if not tokens:
         return []
-    joined = [j for j in _stems("".join(tokens)) if len(j) >= 5]
+    joined = [j for j in ["".join(tokens), *_stems("".join(tokens))] if len(j) >= 5]
+    # Exact against the words as typed too, before aliases: "Single-leg RDL
+    # Circuit" is an exercise's own name, whatever "rdl" stands for elsewhere.
+    exact = {
+        tuple(_singular(t) for t in tokens),
+        tuple(_singular(w) for w in _words(term)),
+    }
 
     scored: list[tuple[int, int, str, Exercise]] = []
     for exercise in all_exercises():
         words = _words(exercise.name)
         flat = "".join(words)
-        if [_singular(w) for w in words] == [_singular(t) for t in tokens]:
+        if tuple(_singular(w) for w in words) in exact:
             rank = 0
         elif all(any(_starts(w, tok) for w in words) for tok in tokens):
             rank = 1
@@ -173,7 +199,8 @@ def validate(category: str, exercise_name: str = "") -> Exercise:
     letting Garmin answer with a bare 400.
     """
     cat = category.upper().strip()
-    ex = (exercise_name or "").upper().strip()
+    # A category alone is its generic entry, which every category has.
+    ex = (exercise_name or "").upper().strip() or cat
 
     if cat not in categories():
         close = difflib.get_close_matches(cat, categories(), n=5, cutoff=0.4)
@@ -219,19 +246,76 @@ def match(name: str) -> Exercise | None:
     for close in difflib.get_close_matches(query, list(lookup), n=3, cutoff=0.82):
         if _same_words(_words(query), _words(close)):
             return lookup[close]
+    # The same words joined differently: "pullups" is "Pull-up", "lat
+    # pulldowns" is "Lat Pull-down".
+    joined = _joined(_query_tokens(name))
+    same = [e for e in all_exercises() if _joined(_words(e.name)) == joined]
+    if len(same) == 1:
+        return same[0]
+    # The only exercise search finds, if it adds no more than an implement.
     found = [exercise for rank, exercise in _ranked(name) if rank <= 1]
-    return found[0] if len(found) == 1 else None
+    if len(found) == 1 and _adds_only_an_implement(_query_tokens(name), _words(found[0].name)):
+        return found[0]
+    return None
+
+
+def _significant(words: list[str]) -> list[str]:
+    """Singular words, without the "s" of a possessive ("Farmer's" -> "farmer")."""
+    return [_singular(w) for w in words if w != "s"]
+
+
+def _joined(words: list[str]) -> str:
+    return "".join(_significant(words))
+
+
+def _adds_only_an_implement(query: list[str], name: list[str]) -> bool:
+    """Every query word is in the name, which has at most one more: an implement."""
+    extra = _significant(name)
+    for word in _significant(query):
+        if word not in extra:
+            return False
+        extra.remove(word)
+    return len(extra) <= 1 and all(word in IMPLEMENTS for word in extra)
 
 
 def _same_words(ours: list[str], theirs: list[str]) -> bool:
-    """Word for word the same, up to plurals and a typo that keeps the first letter."""
+    """Word for word the same, up to plurals and typos.
+
+    A query word that is itself a word the catalogue uses is taken as meant:
+    "adduction" is not a typo for "abduction", nor "overhand" for "overhead".
+    Any other word may be one edit away, or two in a long word, keeping its
+    first letter.
+    """
+    vocabulary = _vocabulary()
 
     def same(a: str, b: str) -> bool:
         if _singular(a) == _singular(b):
             return True
-        return a[:1] == b[:1] and difflib.SequenceMatcher(None, a, b).ratio() >= 0.8
+        if _singular(a) in vocabulary or a[:1] != b[:1]:
+            return False
+        return _edits(a, b) <= (2 if len(b) >= 8 else 1)
 
     return len(ours) == len(theirs) and all(same(a, b) for a, b in zip(ours, theirs, strict=True))
+
+
+@lru_cache(maxsize=1)
+def _vocabulary() -> frozenset[str]:
+    """Every word in the catalogue's names, singular."""
+    return frozenset(_singular(w) for e in all_exercises() for w in _words(e.name))
+
+
+def _edits(a: str, b: str) -> int:
+    """Edit distance, counting a swap of neighbouring letters as one edit."""
+    rows = [list(range(len(b) + 1))]
+    for i in range(1, len(a) + 1):
+        row = [i] + [0] * len(b)
+        for j in range(1, len(b) + 1):
+            cost = 0 if a[i - 1] == b[j - 1] else 1
+            row[j] = min(rows[-1][j] + 1, row[j - 1] + 1, rows[-1][j - 1] + cost)
+            if i > 1 and j > 1 and a[i - 1] == b[j - 2] and a[i - 2] == b[j - 1]:
+                row[j] = min(row[j], rows[-2][j - 2] + 1)
+        rows.append(row)
+    return rows[-1][-1]
 
 
 def _normalise(value: str) -> str:
