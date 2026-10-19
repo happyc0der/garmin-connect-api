@@ -105,10 +105,16 @@ def push(workout_id: int = Path(gt=0), device_id: int | None = Query(None)) -> d
     """Send a workout to a watch.
 
     It arrives at the watch's next sync, not immediately. With no device id
-    the last-used device is chosen.
+    the last-used device is chosen if it is a real device on the account,
+    else the primary activity tracker; the reply names the device used.
     """
-    service.push_to_device(workout_id, device_id)
-    return {"workout_id": workout_id, "status": "queued for device"}
+    target = service.push_to_device(workout_id, device_id)
+    return {
+        "workout_id": workout_id,
+        "device_id": target.device_id,
+        "device_name": target.name or target.product,
+        "status": "queued for device",
+    }
 
 
 @router.delete("/{workout_id}", operation_id="delete_workout")

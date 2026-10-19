@@ -13,7 +13,7 @@ from fastapi.testclient import TestClient
 from garminconnect import GarminConnectConnectionError
 
 from garmin_api import auth
-from garmin_api.errors import Duplicate, InvalidRequest, NotAuthenticated, RateLimited
+from garmin_api.errors import Duplicate, NotAuthenticated, RateLimited
 from garmin_api.http.app import create_app
 
 STRENGTH_ROW = {
@@ -213,11 +213,3 @@ def test_week_summary_uses_garmins_today(fake_garmin: dict[str, Any]) -> None:
     )
     result = asyncio.run(create_mcp().call_tool("week_summary", {}))
     assert result.structured_content["to"] == "2026-10-18"
-
-
-def test_pushing_with_no_last_used_device_says_what_to_do(fake_garmin: dict[str, Any]) -> None:
-    from garmin_api.services import workouts
-
-    fake_garmin["responses"]["get_device_last_used"] = {}
-    with pytest.raises(InvalidRequest, match="last-used device"):
-        workouts.push_to_device(7)
