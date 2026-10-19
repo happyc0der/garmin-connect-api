@@ -8,7 +8,7 @@ two years so a single question cannot become hundreds of requests.
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from .. import auth
@@ -27,6 +27,17 @@ from ..models.trends import (
 )
 
 MAX_DAYS = 731
+
+# The longest range, in days, each endpoint answers in one request, found live
+# on 19 Oct 2026: stress and body battery refuse more than 28 days ("difference
+# in days ... cannot be more than 28"), HRV more than 366 days apart. Longer
+# ranges are fetched in windows; steps are already split by the library.
+WINDOW_DAYS = {
+    "get_daily_stress_stats": 28,
+    "get_daily_body_battery_stats": 28,
+    "get_hrv_data_range": 365,
+    "get_training_readiness_range": 28,
+}
 
 
 def trend(
@@ -74,6 +85,31 @@ def _day(value: Any) -> date | None:
         return None
 
 
+def _windows(start: date, end: date, days: int) -> list[tuple[str, str]]:
+    """``start`` to ``end`` as consecutive ranges of at most ``days`` days."""
+    out: list[tuple[str, str]] = []
+    cursor = start
+    while cursor <= end:
+        stop = min(end, cursor + timedelta(days=days - 1))
+        out.append((cursor.isoformat(), stop.isoformat()))
+        cursor = stop + timedelta(days=1)
+    return out
+
+
+def _rows(fn_name: str, start: date, end: date, key: str | None = None) -> list[Any]:
+    """Every row a range endpoint gives for ``start`` to ``end``, a window at a time.
+
+    ``key`` names the list inside a dict reply, for endpoints that wrap theirs.
+    """
+    rows: list[Any] = []
+    for s, e in _windows(start, end, WINDOW_DAYS.get(fn_name, MAX_DAYS)):
+        reply = auth.call(fn_name, s, e)
+        if key is not None:
+            reply = reply.get(key) if isinstance(reply, dict) else None
+        rows.extend(reply or [])
+    return rows
+
+
 def _daily(metric: Metric, start: date, end: date, aggregation: Aggregation) -> list[Point]:
     s, e = start.isoformat(), end.isoformat()
     points: list[Point] = []
@@ -105,8 +141,7 @@ def _daily(metric: Metric, start: date, end: date, aggregation: Aggregation) -> 
                 points.append(Point(period=day, value=float(values["sleepScore"])))
 
     elif metric is Metric.hrv:
-        payload = auth.call("get_hrv_data_range", s, e) or {}
-        for row in payload.get("hrvSummaries") or []:
+        for row in _rows("get_hrv_data_range", start, end, key="hrvSummaries"):
             day, value = _day(row.get("calendarDate")), row.get("lastNightAvg")
             if day and value:
                 points.append(
@@ -118,7 +153,7 @@ def _daily(metric: Metric, start: date, end: date, aggregation: Aggregation) -> 
         from .health import morning_readiness
 
         rows_by_day: dict[date, list[dict[str, Any]]] = {}
-        for row in auth.call("get_training_readiness_range", s, e) or []:
+        for row in _rows("get_training_readiness_range", start, end):
             day = _day(row.get("calendarDate"))
             if day:
                 rows_by_day.setdefault(day, []).append(row)
@@ -134,7 +169,7 @@ def _daily(metric: Metric, start: date, end: date, aggregation: Aggregation) -> 
                 )
 
     elif metric is Metric.stress:
-        for row in auth.call("get_daily_stress_stats", s, e) or []:
+        for row in _rows("get_daily_stress_stats", start, end):
             day, value = (
                 _day(row.get("calendarDate")),
                 (row.get("values") or {}).get("overallStressLevel"),
@@ -143,7 +178,7 @@ def _daily(metric: Metric, start: date, end: date, aggregation: Aggregation) -> 
                 points.append(Point(period=day, value=float(value)))
 
     elif metric is Metric.body_battery:
-        for row in auth.call("get_daily_body_battery_stats", s, e) or []:
+        for row in _rows("get_daily_body_battery_stats", start, end):
             day, values = _day(row.get("calendarDate")), row.get("values") or {}
             if day and values.get("highBodyBattery") is not None:
                 points.append(
