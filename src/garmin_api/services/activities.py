@@ -305,7 +305,22 @@ def _edit_sets(activity_id: int | str, edit: SetEdit) -> ActivitySets:
         activity_id,
         {"activityId": int(activity_id), "exerciseSets": kept},
     )
-    return get_sets(activity_id)
+    # The edit is applied now. If reading it back fails, that is reported as
+    # a success with what was written: an error would invite a retry, and a
+    # retried "delete set 2" would delete whichever set is set 2 by then.
+    try:
+        return get_sets(activity_id)
+    except Exception:  # noqa: BLE001 -- the write itself succeeded, a 429 included
+        written = ActivitySets.from_garmin(int(activity_id), {"exerciseSets": kept})
+        written.sets = written.working_sets
+        written.note = _APPLIED_UNREAD
+        return written
+
+
+_APPLIED_UNREAD = (
+    "The edit was applied, but Garmin's copy could not be read back; these are the sets as "
+    "written. Do not repeat the edit."
+)
 
 
 def _is_rest(row: dict[str, Any]) -> bool:

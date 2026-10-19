@@ -108,4 +108,6 @@ async def decode(
     activity's original file, then decode it here into the same typed shape
     used to log one.
     """
-    return decode_strength_session(await file.read(), name=name)
+    data = await file.read()
+    # Off the event loop: parsing a large file would hold up every request.
+    return await run_in_threadpool(decode_strength_session, data, name=name)
