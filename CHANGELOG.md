@@ -29,6 +29,9 @@ recommended: its first item can lock a running server out of the account.
 - **Times without an offset** are refused if the account's timezone cannot be read, instead of
   being placed in the machine's.
 - A small zip could expand to gigabytes when decoded; FIT data is capped at 32 MB.
+- An odd value in a day's stats no longer sinks the whole day summary, or the week; a connect
+  Garmin rate limits holds calls for a minute instead of each trying again; a rate limit while
+  naming a logged session stops there.
 
 ### Documentation
 
