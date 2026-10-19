@@ -32,7 +32,8 @@ jobs:
           # (3.13), so everything installs into a venv that later steps use.
           activate-environment: true
       - name: Install
-        run: uv pip install -e ".[dev]"
+        # From uv.lock, so CI tests exactly the versions the lock file pins.
+        run: uv sync --locked
       - name: Lint
         if: matrix.os == 'ubuntu-latest'
         run: ruff check src tests && ruff format --check src tests

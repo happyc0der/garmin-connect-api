@@ -30,7 +30,7 @@ jobs:
           test "$tag" = "$project" && test "$tag" = "$server" && test "$tag" = "$package"
       - name: Tests
         run: |
-          uv pip install -e ".[dev]"
+          uv sync --locked
           ruff check src tests
           mypy src
           pytest tests -p no:warnings

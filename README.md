@@ -12,6 +12,14 @@ strength sessions, and weigh-ins with full body composition.
 > and using them is not sanctioned by Garmin's terms. It is meant for your own account and your
 > own data.
 
+## Status
+
+v0.2. Reads activities with per-set strength detail, laps and pool-swim lengths, daily health,
+trends over up to two years and named personal records; writes strength, run, ride and swim
+workouts, completed strength sessions, set corrections and weigh-ins with body composition. 41
+tools, every one checked against a real account. Bug reports and feature requests go to
+[GitHub Issues](https://github.com/happyc0der/garmin-connect-api/issues).
+
 ## Quick start
 
 You need [uv](https://docs.astral.sh/uv/) and Python 3.12 or newer.
@@ -81,6 +89,51 @@ Connect as a Strength Training activity, exercise by exercise.
 **Body composition** from a smart scale (fat, water, skeletal muscle, bone, BMI, basal metabolic
 rate, visceral fat) is written as a FIT weight-scale file, the way Garmin's own Index scales do it.
 A plain weigh-in carries weight alone.
+
+## Example output
+
+Answers come back compact, summarised the way a person would read them. These are from made-up
+data in the shapes Garmin returns.
+
+"Did my pace hold up in yesterday's swim?" calls `get_activity_laps`:
+
+```json
+{
+  "sport": "lap_swimming",
+  "pool_length": 25.0,
+  "pool_unit": "m",
+  "summary": {
+    "lengths": 80,
+    "distance": 2000.0,
+    "average_pace": "1:52/100m",
+    "first_half_pace": "1:50/100m",
+    "second_half_pace": "1:54/100m",
+    "by_stroke": {"FREESTYLE": 1800.0, "BACKSTROKE": 200.0},
+    "fastest_segment": {"lengths": "5-8", "pace": "1:44/100m"},
+    "slowest_segment": {"lengths": "77-80", "pace": "2:01/100m"}
+  }
+}
+```
+
+"How has my resting heart rate moved since summer?" calls `get_trend`, which rolls a long range
+into weeks:
+
+```json
+{
+  "metric": "resting_hr",
+  "unit": "bpm",
+  "aggregation": "week",
+  "summary": {
+    "days_with_data": 88,
+    "average": 54.2,
+    "min": 49.0,
+    "max": 61.0,
+    "first_period_average": 57.3,
+    "last_period_average": 51.6,
+    "change": -6.0
+  }
+}
+```
 
 ## Before you write anything
 
@@ -171,7 +224,7 @@ host but `localhost`, which defeats DNS rebinding. Binding beyond localhost requ
 ```bash
 git clone https://github.com/happyc0der/garmin-connect-api
 cd garmin-connect-api
-uv venv && uv pip install -e ".[dev]"
+uv sync
 uv run pytest
 ```
 
@@ -193,6 +246,11 @@ Garmin's official Connect Developer Program is for businesses, has no endpoint t
 completed activity, and was closed to new applicants in 2026. The aggregators that wrap it cost
 hundreds of dollars a month and are read-only or plans-only. So this uses the endpoints Garmin's
 own website uses, gently: no polling, no retries on a rate limit.
+
+## Citing
+
+If you use this in research, cite it with the metadata in [CITATION.cff](https://github.com/happyc0der/garmin-connect-api/blob/main/CITATION.cff);
+GitHub's "Cite this repository" button formats it.
 
 ## Licence
 

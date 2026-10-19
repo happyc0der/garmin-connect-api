@@ -1,0 +1,17 @@
+cff-version: 1.2.0
+message: "If you use garmin-connect-api in research, please cite it as below."
+title: "garmin-connect-api: read and write Garmin Connect from Python, HTTP or an MCP client"
+type: software
+authors:
+  - name: "garmin-connect-api contributors"
+repository-code: "https://github.com/happyc0der/garmin-connect-api"
+url: "https://github.com/happyc0der/garmin-connect-api"
+license: MIT
+version: 0.2.0
+date-released: 2026-10-19
+keywords:
+  - Garmin Connect
+  - fitness
+  - strength training
+  - Model Context Protocol
+  - FIT

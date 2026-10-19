@@ -33,7 +33,6 @@ dependencies = [
     "fastmcp>=4.0,<5",
     "fit-tool>=0.9.13,<1",
     "typer>=0.15",
-    "httpx>=0.27",
 ]
 
 [project.urls]
@@ -48,27 +47,28 @@ Changelog = "https://github.com/happyc0der/garmin-connect-api/blob/main/CHANGELO
 garmin-connect-api = "garmin_api.cli:mcp_entry"
 garmin = "garmin_api.cli:app"
 
-[project.optional-dependencies]
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[dependency-groups]
+# Development tools: installed by `uv sync`, never published with the package.
 dev = [
     "pytest>=8.3",
-    "pytest-asyncio>=0.24",
     "ruff>=0.8",
     "mypy>=1.13",
+    "httpx>=0.27",  # FastAPI's TestClient
     "jsonschema>=4.23",
     # Lets jsonschema check the "date-time" format, as strict MCP clients do.
     "rfc3339-validator>=0.1.4",
 ]
-
-[build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/garmin_api"]
 
 [tool.hatch.build.targets.sdist]
 # Tests travel with the source; the live ones skip themselves without a login.
-include = ["src/garmin_api", "tests", "examples", "README.md", "LICENSE", "CHANGELOG.md", "SECURITY.md", "server.json"]
+include = ["src/garmin_api", "tests", "examples", "README.md", "LICENSE", "CHANGELOG.md", "SECURITY.md", "CITATION.cff", "server.json"]
 
 [tool.ruff]
 line-length = 100
