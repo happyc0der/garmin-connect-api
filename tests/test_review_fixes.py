@@ -53,6 +53,31 @@ def test_the_status_is_found_through_the_cause_chain() -> None:
         assert isinstance(auth.translate(wrapped), RateLimited)
 
 
+def test_a_409_from_the_upload_service_is_a_duplicate_with_the_existing_id(
+    tmp_path: Path, fake_garmin: dict[str, Any]
+) -> None:
+    """upload_activity raises "API Error 409" with Garmin's reply attached, not import's wording."""
+    from garmin_api.services import uploads
+
+    reply = {
+        "detailedImportResult": {
+            "failures": [{"internalId": 21000000001, "messages": [{"content": "Duplicate."}]}]
+        }
+    }
+    raised = GarminConnectConnectionError("API Error 409 - Duplicate Activity.")
+    raised.response = SimpleNamespace(status_code=409, json=lambda: reply)
+
+    def upload(*_: Any) -> Any:
+        raise auth.translate(raised) from raised
+
+    fake_garmin["responses"]["upload_activity"] = upload
+    session = tmp_path / "session.fit"
+    session.write_bytes(b"fit")
+    result = uploads.upload_file(session)
+    assert result["status"] == "duplicate"
+    assert result["activity_id"] == 21000000001
+
+
 def test_a_duplicate_upload_is_reported_as_one(tmp_path: Path, monkeypatch) -> None:
     from garmin_api.services import uploads
 
