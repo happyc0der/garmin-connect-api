@@ -1,5 +1,45 @@
 # Changelog
 
+## 0.2.3 (2026-10-19)
+
+A third review round: 0.2.2's own changes checked for regressions, concurrency and process
+lifetime, end-to-end journeys driving the MCP as a model would against a stateful fake Garmin, and
+the fuzz and property harnesses rerun and extended. Each finding was reproduced before it was
+fixed, and each fix has a test that fails without it.
+
+### Fixed
+
+- **Logging out or in while a server runs.** A running server ignored `garmin logout`, and a
+  login as someone else, and kept using the old account; later it wrote that account's refreshed
+  tokens back over the new login's. `garmin login` itself resumed stored tokens and ignored the
+  password typed. Logins now leave a marker the server checks, and a dropped client can no longer
+  write tokens back.
+- **A rate limit met while connecting** was reported as "run `garmin login`", which on a throttled
+  account leads straight to the SSO lockout. It is reported as a rate limit.
+- **Several calls at once.** Two edits to one activity's sets could lose one; concurrent 401s each
+  rebuilt the client, and refused tokens were tried again by every call; uploads blocked the
+  service; two sessions logged at once could each claim the other's activity.
+- **Times without an offset** are taken as the account's own local time when logging a session or
+  recording a weigh-in, instead of being refused, which left a model to guess UTC. The summary
+  tools give local start times and the account's timezone, so an evening session no longer reads
+  as the next day's.
+- **A misspelt tool argument** was silently dropped: `create_strength_workout(date=...)` saved the
+  workout and never scheduled it. Unknown arguments are refused, naming the ones the tool takes.
+- **Listing the MCP server's resources** failed on every client.
+- **Replies that guide the next step.** Logging a session says when Garmin has not finished, so
+  the name and notes are not applied yet; when another activity starts at the same second; when
+  several new activities could be the upload; and how long the session is. A find_exercise result
+  can be passed on whole.
+- **Trends.** The change is between whole weeks or months, not a stub at either end; a day two
+  windows both return counts once.
+- **The day summary** reports an outage when every part fails, and one odd value costs only its
+  part.
+- **0.2.2's regressions.** Pages on other local ports could write again when the Host header had
+  no port; "Push-ups" and other hyphenated plurals stopped matching; decoding made rests out of
+  rounding; a decoded set the watch could not identify could not be logged.
+- Smaller: a deleted set takes its rest with it; `garmin workout unschedule`; numbers are never
+  typos in exercise matching; infinite numbers get a 422, not a 500.
+
 ## 0.2.2 (2026-10-19)
 
 A second review round: a check of 0.2.1's own fixes for regressions, fuzzing of every route and
