@@ -426,10 +426,11 @@ def test_a_hand_written_tool_reports_an_odd_reply_as_garmins(fake_garmin: dict[s
 
     fake_garmin["responses"].update(
         {
-            "get_stats": {"totalSteps": 9312.5},
+            "get_stats": {},
             "get_sleep_data": None,
             "get_training_readiness": None,
-            "connectapi": [],
+            # An activity name that is not a string: no tolerance covers it.
+            "connectapi": [{"activityId": 1, "activityName": {"not": "a string"}}],
         }
     )
 

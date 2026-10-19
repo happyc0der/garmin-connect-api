@@ -18,6 +18,7 @@ from __future__ import annotations
 import logging
 import os
 import threading
+import time
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
@@ -158,6 +159,9 @@ def _refusal(exc: BaseException) -> bool:
 # judged refusal heals itself; long enough to spare Garmin a storm of logins.
 REFUSAL_HOLD_S = 600
 
+# After Garmin rate limits a connect, how long every call waits before trying.
+RATE_LIMIT_COOLDOWN_S = 60
+
 
 def translate(exc: Exception) -> Exception:
     """Map a library or transport exception onto this package's vocabulary.
@@ -265,6 +269,7 @@ class Session:
         # The stored login Garmin last refused, so calls fail at once rather
         # than each trying it again, until a new login replaces it.
         self._refused: tuple[str | None, int, float] | None = None
+        self._cooling_until = 0.0
         self._lock = threading.RLock()
 
     @property
@@ -293,6 +298,11 @@ class Session:
                     "No Garmin tokens found.",
                     detail=f"Run `garmin login` first. Tokens are stored in {self._tokens}.",
                 )
+            if time.monotonic() < self._cooling_until:
+                raise RateLimited(
+                    "Garmin is rate limiting this account.",
+                    detail="Wait before trying again. Do not retry in a loop.",
+                )
             if self._held():
                 raise NotAuthenticated(
                     "Garmin rejected the stored credentials.",
@@ -307,7 +317,11 @@ class Session:
             except Exception as exc:  # noqa: BLE001 -- re-raised as our own type
                 if _refusal(exc):
                     self._hold()
-                raise translate(exc) from exc
+                error = translate(exc)
+                if isinstance(error, RateLimited):
+                    # Calls queued behind this one would each try again.
+                    self._cooling_until = time.monotonic() + RATE_LIMIT_COOLDOWN_S
+                raise error from exc
             # The library loads the profile's timezone on first use, without a
             # lock, and a caller racing that load gets the machine's timezone.
             # Loaded here, under this lock, before anyone else can use it.
@@ -441,6 +455,11 @@ def account_zone() -> Any:
     from zoneinfo import ZoneInfo
 
     name = call("get_user_timezone")
+    if not name:
+        # The library stops asking after a failure; ask again next time.
+        inner = session()._client
+        if inner is not None and hasattr(inner, "_time_zone_loaded"):
+            inner._time_zone_loaded = False
     if name:
         try:
             return ZoneInfo(name)

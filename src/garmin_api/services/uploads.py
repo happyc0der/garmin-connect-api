@@ -200,6 +200,11 @@ def _label(
             else:
                 activities.set_description(activity_id, value)
             result[field] = value
+        except (RateLimited, NotAuthenticated) as exc:
+            # The upload stands, but no further call should follow this.
+            result["rename_failed" if field == "name" else "description_failed"] = str(exc)
+            result["note"] = f"Logged, but not named or described: {exc.message}"
+            return
         except Exception as exc:  # noqa: BLE001 -- the upload itself succeeded
             logger.warning("Uploaded %s but could not set its %s: %s", activity_id, field, exc)
             result["rename_failed" if field == "name" else "description_failed"] = str(exc)
