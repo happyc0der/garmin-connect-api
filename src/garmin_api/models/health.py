@@ -45,8 +45,11 @@ class SleepSummary(ApiModel):
             rem_s=first(daily, "remSleepSeconds"),
             awake_s=first(daily, "awakeSleepSeconds"),
             sleep_score=overall.get("value") if isinstance(overall, dict) else None,
-            average_spo2=first(payload, "averageSpO2Value", "averageSpO2"),
-            average_respiration=first(payload, "avgRespirationValue", "averageRespirationValue"),
+            # Both live in dailySleepDTO; the top level is a fallback.
+            average_spo2=first(daily, "averageSpO2Value", "avgSpO2", "averageSpO2")
+            or first(payload, "averageSpO2Value", "avgSpO2", "averageSpO2"),
+            average_respiration=first(daily, "averageRespirationValue", "avgRespirationValue")
+            or first(payload, "averageRespirationValue", "avgRespirationValue"),
             raw=payload if include_raw else None,
         )
 
@@ -147,7 +150,9 @@ class DaySummary(ApiModel):
     body_battery_low: int | None = None
     hrv_last_night_avg: int | None = None
     hrv_status: str | None = None
-    training_readiness: int | None = None
+    training_readiness: int | None = Field(
+        default=None, description="The morning score Garmin sets on waking."
+    )
     sleep: SleepSummary | None = None
     weight: WeighIn | None = None
     raw: dict[str, Any] | None = None
@@ -276,7 +281,7 @@ class StepsSummary(ApiModel):
     """
 
     day: date
-    total: int = 0
+    total: int | None = Field(default=0, description="None when Garmin did not answer.")
     hourly_gmt: list[int] = Field(default_factory=list, description="24 values, hour 0 to 23 GMT.")
     buckets: list[dict[str, Any]] | None = Field(
         default=None, description="Garmin's quarter-hour buckets, only when asked for."

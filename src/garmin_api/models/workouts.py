@@ -74,7 +74,7 @@ class StrengthExerciseSpec(ApiModel):
     category: str = Field(description='Garmin exercise category, e.g. "BENCH_PRESS".')
     exercise_name: str = Field(
         default="",
-        description='Variant, e.g. "BARBELL_BENCH_PRESS". Empty shows the category name alone.',
+        description='Variant, e.g. "BARBELL_BENCH_PRESS". Empty means the generic one.',
     )
     sets: int = Field(default=1, ge=1, le=99)
     reps: int = Field(default=10, ge=1, le=999)
@@ -85,6 +85,13 @@ class StrengthExerciseSpec(ApiModel):
     @classmethod
     def _upper(cls, value: str) -> str:
         return (value or "").upper().strip()
+
+    @model_validator(mode="after")
+    def _generic(self) -> StrengthExerciseSpec:
+        # Every category has a generic entry named after itself.
+        if not self.exercise_name:
+            self.exercise_name = self.category
+        return self
 
 
 class StrengthWorkoutSpec(ApiModel):
@@ -190,7 +197,8 @@ DISTANCE_UNITS = {"m": 1.0, "km": 1000.0, "mi": 1609.344, "yd": 0.9144}
 class Target(ApiModel):
     """What to hold during a step. Give exactly one.
 
-    Paces are "m:ss" strings, slower first: ``pace_per_km=["5:30", "5:00"]``.
+    Paces are "m:ss" strings: ``pace_per_km=["5:30", "5:00"]``. A range may
+    be given either way round; it is put in order here.
     """
 
     pace_per_km: tuple[str, str] | None = None
@@ -212,18 +220,26 @@ class Target(ApiModel):
         for name in ("pace_per_km", "pace_per_mile"):
             value = getattr(self, name)
             if value is not None:
-                for text in value:
-                    _seconds(text)
+                # Slower first, which is the lower speed Garmin wants first.
+                setattr(self, name, tuple(sorted(value, key=_seconds, reverse=True)))
+        for name in ("speed_kph", "heart_rate_bpm", "power_watts", "cadence"):
+            value = getattr(self, name)
+            if value is not None:
+                if min(value) <= 0:
+                    raise ValueError(f"{name} must be above zero, got {list(value)}")
+                setattr(self, name, tuple(sorted(value)))
         return self
 
 
 def _seconds(text: str) -> int:
     """'5:30' -> 330."""
     try:
-        minutes, seconds = text.strip().split(":")
-        return int(minutes) * 60 + int(seconds)
+        minutes, seconds = (int(part) for part in text.strip().split(":"))
     except ValueError as exc:
         raise ValueError(f"pace {text!r} should look like 5:30") from exc
+    if not 0 <= seconds < 60 or minutes < 0 or minutes * 60 + seconds == 0:
+        raise ValueError(f"pace {text!r} should look like 5:30, and not be zero")
+    return minutes * 60 + seconds
 
 
 class EnduranceStep(ApiModel):

@@ -6,6 +6,7 @@ from datetime import date, datetime
 from typing import Any
 
 from .. import auth
+from ..errors import InvalidRequest
 from ..models.common import as_date_str
 from ..models.health import BodyCompositionSpec, WeighIn
 
@@ -45,7 +46,22 @@ def add_weigh_in(
     Unlike everywhere else in Garmin's API, this one takes kilograms (or
     pounds) rather than grams.
     """
-    stamp = timestamp.isoformat() if isinstance(timestamp, datetime) else (timestamp or "")
+    stamp = ""
+    if timestamp:
+        try:
+            moment = (
+                timestamp if isinstance(timestamp, datetime) else datetime.fromisoformat(timestamp)
+            )
+        except ValueError as exc:
+            raise InvalidRequest(
+                f"Not a timestamp: {timestamp!r}.", detail="Use ISO 8601."
+            ) from exc
+        if moment.tzinfo is not None:
+            # Garmin files a weigh-in under the local date and time it is
+            # given, so an instant in UTC would land on the wrong evening's
+            # day; it is moved into the account's own timezone first.
+            moment = moment.astimezone(auth.call("_user_tzinfo"))
+        stamp = moment.isoformat()
     return auth.call("add_weigh_in", weight, unit, stamp)
 
 

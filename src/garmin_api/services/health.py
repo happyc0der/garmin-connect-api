@@ -147,10 +147,9 @@ def day(
 
     if "readiness" in parts:
         readiness = training_readiness(day_str)
-        if isinstance(readiness, list) and readiness:
-            first_entry = readiness[0]
-            if isinstance(first_entry, dict):
-                summary.training_readiness = first_entry.get("score")
+        morning = morning_readiness(readiness if isinstance(readiness, list) else [])
+        if morning is not None:
+            summary.training_readiness = morning.get("score")
 
     if "weight" in parts:
         weigh_ins = _safe("get_daily_weigh_ins", day_str) or {}
@@ -159,6 +158,20 @@ def day(
             summary.weight = WeighIn.from_garmin(rows[0], include_raw=include_raw)
 
     return summary
+
+
+def morning_readiness(rows: list[Any]) -> dict[str, Any] | None:
+    """The day's training readiness entry: the score Garmin sets on waking.
+
+    Garmin keeps several a day, updating the score as the day goes on; the
+    one labelled AFTER_WAKEUP_RESET is the morning score, comparable from day
+    to day. Without it, the first entry with a score.
+    """
+    scored = [r for r in rows if isinstance(r, dict) and r.get("score") is not None]
+    for row in scored:
+        if row.get("inputContext") == "AFTER_WAKEUP_RESET":
+            return row
+    return scored[0] if scored else None
 
 
 def hrv_summary(day: date | str, *, include_readings: bool = False) -> HrvSummary | None:
@@ -173,8 +186,12 @@ def stress_summary(day: date | str, *, include_samples: bool = False) -> StressS
 
 def steps_summary(day: date | str, *, include_buckets: bool = False) -> StepsSummary:
     day_str = as_date_str(day)
+    payload = steps(day_str)
+    if payload is None:
+        # Garmin did not answer, which is not the same as no steps.
+        return StepsSummary(day=date.fromisoformat(day_str), total=None)
     return StepsSummary.from_garmin(
-        date.fromisoformat(day_str), steps(day_str) or [], include_buckets=include_buckets
+        date.fromisoformat(day_str), payload, include_buckets=include_buckets
     )
 
 
@@ -187,7 +204,12 @@ def record_types() -> dict[int, dict[str, Any]]:
     if _record_types is None:
         from ..models.records import index
 
-        _record_types = index(_safe("get_personal_record_types"))
+        found = index(_safe("get_personal_record_types"))
+        if not found:
+            # A failed request; asked again next time rather than leaving
+            # every record unnamed for the life of the process.
+            return found
+        _record_types = found
     return _record_types
 
 
@@ -195,4 +217,5 @@ def records() -> list[PersonalRecord]:
     """Personal records with names and units, most recent first."""
     types = record_types()
     rows = [PersonalRecord.from_garmin(r, types) for r in (personal_records() or [])]
-    return sorted(rows, key=lambda r: (r.achieved_at is None, r.achieved_at), reverse=True)
+    # Newest first, and records with no date after all the dated ones.
+    return sorted(rows, key=lambda r: (r.achieved_at is not None, r.achieved_at), reverse=True)

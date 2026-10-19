@@ -23,7 +23,7 @@ from garminconnect.workout import (
 )
 
 from .. import auth, catalogue
-from ..errors import InvalidRequest, NotFound
+from ..errors import GarminApiError, InvalidRequest, NotFound
 from ..models.common import as_date_str
 from ..models.health import DeviceSummary
 from ..models.workouts import (
@@ -98,9 +98,26 @@ def create_strength(spec: StrengthWorkoutSpec) -> WorkoutSummary:
     payload = build_strength(spec)
     created = auth.call("upload_workout", payload)
     summary = WorkoutSummary.from_garmin(created or {}, include_raw=True)
-    if spec.schedule_date and summary.workout_id:
-        schedule(summary.workout_id, spec.schedule_date)
+    _schedule_new(summary, spec.schedule_date)
     return summary
+
+
+def _schedule_new(summary: WorkoutSummary, day: date | None) -> None:
+    """Schedule a workout just created, keeping its id if that fails.
+
+    The workout exists by now, so the caller has to learn its id: retrying
+    the whole request would create a second copy.
+    """
+    if not day or not summary.workout_id:
+        return
+    try:
+        schedule(summary.workout_id, day)
+    except GarminApiError as exc:
+        exc.detail = (
+            f"The workout was created as {summary.workout_id} but not scheduled; "
+            f"schedule that one rather than creating it again. {exc.detail or ''}"
+        ).strip()
+        raise
 
 
 def create_raw(workout_json: dict[str, Any]) -> WorkoutSummary:
@@ -428,6 +445,5 @@ def create_endurance(spec: EnduranceWorkoutSpec) -> WorkoutSummary:
     """Create a run, ride or pool swim workout, and schedule it if asked."""
     created = auth.call("upload_workout", build_endurance(spec))
     summary = WorkoutSummary.from_garmin(created or {}, include_raw=True)
-    if spec.schedule_date and summary.workout_id:
-        schedule(summary.workout_id, spec.schedule_date)
+    _schedule_new(summary, spec.schedule_date)
     return summary
