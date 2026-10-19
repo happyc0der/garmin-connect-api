@@ -10,7 +10,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Self
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from .common import ApiModel, first, grams_to_kg, parse_dt, parse_local
 
@@ -202,3 +202,36 @@ class ActivitySets(ApiModel):
                 )
             )
         return cls(activity_id=activity_id, sets=sets)
+
+
+class SetChange(ApiModel):
+    """A change to one or more working sets, by their set_number.
+
+    Give the exercise as Garmin's category and exercise_name pair; leave out
+    what should stay as it is.
+    """
+
+    sets: list[int] = Field(
+        min_length=1, description="Working set numbers, as get_activity_sets shows."
+    )
+    category: str | None = Field(default=None, description='e.g. "ROW".')
+    exercise_name: str | None = Field(
+        default=None, description='e.g. "DUMBBELL_ROW". Empty for just the category.'
+    )
+    reps: int | None = Field(default=None, ge=0, le=999)
+    weight_kg: float | None = Field(default=None, ge=0, le=1000)
+
+    @model_validator(mode="after")
+    def _something(self) -> SetChange:
+        if self.exercise_name and not self.category:
+            raise ValueError("give the category with an exercise_name")
+        if self.category is None and self.reps is None and self.weight_kg is None:
+            raise ValueError("give an exercise, reps or weight_kg to change")
+        return self
+
+
+class SetEdit(ApiModel):
+    """Corrections to an activity's sets: change some, delete some, or both."""
+
+    changes: list[SetChange] = Field(default_factory=list)
+    delete: list[int] = Field(default_factory=list, description="Working set numbers to remove.")

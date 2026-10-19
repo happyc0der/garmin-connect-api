@@ -105,6 +105,34 @@ GARMIN = {
     "get_devices": [
         {"deviceId": 3500000001, "displayName": "Example Watch", "deviceStatus": "active"}
     ],
+    "get_activity_splits": {
+        "lapDTOs": [
+            {
+                "lapIndex": 1,
+                "distance": 45.72,
+                "duration": 50.0,
+                "lengthDTOs": [
+                    {
+                        "lengthIndex": 1,
+                        "distance": 22.86,
+                        "duration": 25.0,
+                        "swimStroke": "FREESTYLE",
+                    },
+                    {
+                        "lengthIndex": 2,
+                        "distance": 22.86,
+                        "duration": 25.0,
+                        "swimStroke": "FREESTYLE",
+                    },
+                ],
+            }
+        ]
+    },
+    "get_daily_steps": [{"calendarDate": "2026-10-17", "totalSteps": 5000, "stepGoal": 6000}],
+    "get_hrv_data_range": {
+        "hrvSummaries": [{"calendarDate": "2026-10-17", "lastNightAvg": 60, "status": "BALANCED"}]
+    },
+    "get_personal_record_types": [{"id": 1, "key": "pr.label.1k.run", "sport": "RUNNING"}],
     "get_workouts": [
         {
             "workoutId": 7,
@@ -140,6 +168,12 @@ CALLS: list[tuple[str, dict[str, Any]]] = [
     ("get_stress", {"day": "2026-10-18"}),
     ("get_steps", {"day": "2026-10-18"}),
     ("get_personal_records", {}),
+    ("get_activity_laps", {"activity_id": 1}),
+    ("get_trend", {"metric": "steps", "start": "2026-10-17", "end": "2026-10-17"}),
+    (
+        "get_trend",
+        {"metric": "hrv", "start": "2026-10-01", "end": "2026-10-17", "aggregation": "week"},
+    ),
     ("list_devices", {}),
     ("list_weigh_ins", {"start": "2026-10-01", "end": "2026-10-18"}),
     ("list_workouts", {}),

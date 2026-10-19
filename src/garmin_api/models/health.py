@@ -323,27 +323,43 @@ class DeviceSummary(ApiModel):
 
 
 class PersonalRecord(ApiModel):
-    """One personal record.
+    """One personal record, named and in units.
 
-    Garmin does not label its record types in this response, so ``type_id`` is
-    Garmin's own number and ``value`` is in that record's own unit: seconds
-    for a fastest time, metres for a longest distance, a count for steps.
+    ``value`` is in ``unit``: seconds for a fastest distance, metres for a
+    longest distance or climb, watts, steps, days, or kilograms. ``display``
+    is the same thing as a person reads it: 5:14.8, 3.05 km, 326 days.
     """
 
     record_id: int | None = None
     type_id: int | None = None
+    label: str | None = Field(default=None, description='e.g. "Fastest 1 km run".')
+    sport: str | None = None
     value: float | None = None
+    unit: str | None = None
+    display: str | None = None
     activity_type: str | None = None
     activity_id: int | None = None
     activity_name: str | None = None
     achieved_at: datetime | None = None
 
     @classmethod
-    def from_garmin(cls, payload: dict[str, Any]) -> PersonalRecord:
+    def from_garmin(
+        cls, payload: dict[str, Any], types: dict[int, dict[str, Any]] | None = None
+    ) -> PersonalRecord:
+        from .records import convert, display
+
+        type_id = payload.get("typeId")
+        info = (types or {}).get(int(type_id)) if type_id is not None else None
+        unit = info["unit"] if info else None
+        value = convert(payload.get("value"), unit) if unit else payload.get("value")
         return cls(
             record_id=payload.get("id"),
-            type_id=payload.get("typeId"),
-            value=payload.get("value"),
+            type_id=type_id,
+            label=info["label"] if info else None,
+            sport=info["sport"] if info else None,
+            value=value,
+            unit=unit,
+            display=display(value, unit) if unit else None,
             activity_type=payload.get("activityType"),
             activity_id=payload.get("activityId"),
             activity_name=payload.get("activityName"),

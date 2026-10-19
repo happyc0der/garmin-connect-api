@@ -8,7 +8,12 @@ from typing import Any
 from fastapi import APIRouter, Body, Path, Query
 
 from ...models.health import DeviceSummary
-from ...models.workouts import ScheduledWorkout, StrengthWorkoutSpec, WorkoutSummary
+from ...models.workouts import (
+    EnduranceWorkoutSpec,
+    ScheduledWorkout,
+    StrengthWorkoutSpec,
+    WorkoutSummary,
+)
 from ...services import workouts as service
 
 router = APIRouter(prefix="/workouts", tags=["workouts"])
@@ -51,6 +56,19 @@ def create_strength(spec: StrengthWorkoutSpec) -> WorkoutSummary:
     Give schedule_date to put it on the calendar in the same call.
     """
     return service.create_strength(spec)
+
+
+@router.post("/endurance", operation_id="create_endurance_workout", response_model=WorkoutSummary)
+def create_endurance(spec: EnduranceWorkoutSpec) -> WorkoutSummary:
+    """Create a run, ride or pool swim workout to follow on the watch.
+
+    Steps end on a time, a distance or the lap button, and can repeat. Runs
+    and rides take a target: pace per km or mile, speed, heart-rate zone or
+    range, power zone or watts, or cadence. Swims take a stroke, equipment and
+    a pool length; distances must be whole lengths. Give schedule_date to put
+    it on the calendar too.
+    """
+    return service.create_endurance(spec)
 
 
 @router.post("/raw", operation_id="create_workout_from_dto", response_model=WorkoutSummary)

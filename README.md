@@ -48,20 +48,24 @@ macOS, `%APPDATA%\Claude\` on Windows):
 }
 ```
 
-**3. Ask.** "How did I sleep this week?", "Show my last three strength sessions with their sets",
-"Schedule a push day for Thursday: bench 3x8 at 60 kg, overhead press 3x10 at 35 kg".
+**3. Ask.** "How did I sleep this week?", "Did my pace hold up in yesterday's swim?",
+"How has my resting heart rate moved since summer?", "Show my last strength session's sets, and
+change sets 3 to 5 to dumbbell rows", "Schedule a swim for Thursday: 200 easy, then 8 x 100 free
+on 20 seconds rest, in a 25-yard pool".
 
 ## What it can do
 
-37 tools, each annotated so your client knows which only read (25), which add something (7) and
-which delete or overwrite (5), and can ask before running those.
+41 tools, each annotated so your client knows which only read (27), which add something (8) and
+which delete or overwrite (6), and can ask before running those.
 
 | Read | Write |
 | --- | --- |
 | Activities, filtered by type and date | Create a strength workout, schedule it, push it to a watch |
-| Per-set strength detail: exercise, reps, weight | Log a completed strength session, with every set |
-| A day in one answer: steps, heart rate, stress, body battery, sleep, HRV, readiness | Record a weigh-in, or a full body composition reading |
-| Sleep, HRV, stress, steps, training readiness and status | Rename an activity or change its description |
+| Per-set strength detail: exercise, reps, weight | Create a run, ride or pool swim workout, with targets |
+| Laps for runs and rides; pace per 100 for pool swims | Log a completed strength session, with every set |
+| A day in one answer: steps, heart rate, stress, body battery, sleep, HRV, readiness | Correct a session's sets: exercise, reps, weight |
+| Trends over up to two years: twelve metrics, daily, weekly or monthly | Record a weigh-in, or a full body composition reading |
+| Personal records, named and in units | Rename an activity or change its description |
 | Every weigh-in with body composition | Delete an activity, workout or weigh-in |
 | Planned workouts and the calendar | |
 | Garmin's 1,527-exercise catalogue, offline | |
@@ -171,7 +175,7 @@ uv venv && uv pip install -e ".[dev]"
 uv run pytest
 ```
 
-184 offline tests, needing no network and no account, run on Linux, macOS and Windows. They cover the models against real Garmin
+231 offline tests, needing no network and no account, run on Linux, macOS and Windows. They cover the models against real Garmin
 response shapes, the FIT codec's round trip, every one of the 1,527 catalogue exercises against
 the FIT profile, the HTTP routes, and every MCP tool's output against its own advertised schema,
 which strict clients enforce.

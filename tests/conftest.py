@@ -31,6 +31,11 @@ def no_real_tokens(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     tokens.mkdir()
     monkeypatch.setenv("GARMINTOKENS", str(tokens))
     auth.session().reset()
+    # Lookups cached for a process must not leak from one test into the next.
+    from garmin_api.services import activities, health
+
+    monkeypatch.setattr(activities, "_types_cache", None)
+    monkeypatch.setattr(health, "_record_types", None)
     return tokens
 
 

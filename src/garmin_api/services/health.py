@@ -178,5 +178,21 @@ def steps_summary(day: date | str, *, include_buckets: bool = False) -> StepsSum
     )
 
 
+_record_types: dict[int, dict[str, Any]] | None = None
+
+
+def record_types() -> dict[int, dict[str, Any]]:
+    """Garmin's record type list, named and given units. Fetched once a process."""
+    global _record_types
+    if _record_types is None:
+        from ..models.records import index
+
+        _record_types = index(_safe("get_personal_record_types"))
+    return _record_types
+
+
 def records() -> list[PersonalRecord]:
-    return [PersonalRecord.from_garmin(r) for r in (personal_records() or [])]
+    """Personal records with names and units, most recent first."""
+    types = record_types()
+    rows = [PersonalRecord.from_garmin(r, types) for r in (personal_records() or [])]
+    return sorted(rows, key=lambda r: (r.achieved_at is None, r.achieved_at), reverse=True)

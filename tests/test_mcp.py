@@ -25,6 +25,10 @@ EXPECTED = {
     "find_exercise",
     "recent_strength_sessions",
     "week_summary",
+    "get_activity_laps",
+    "edit_activity_sets",
+    "create_endurance_workout",
+    "get_trend",
 }
 
 
@@ -85,6 +89,7 @@ def test_deleting_and_overwriting_tools_are_marked_destructive(tools: dict[str, 
         "delete_weigh_in",
         "unschedule_workout",
         "update_activity",
+        "edit_activity_sets",
     }
 
 

@@ -8,7 +8,8 @@ from typing import Any
 from fastapi import APIRouter, Path, Query, Response
 
 from ...errors import InvalidRequest
-from ...models.activities import Activity, ActivitySets, ActivitySummary
+from ...models.activities import Activity, ActivitySets, ActivitySummary, SetEdit
+from ...models.laps import ActivityLaps
 from ...services import activities as service
 
 router = APIRouter(prefix="/activities", tags=["activities"])
@@ -61,6 +62,27 @@ def get_sets(
     Only strength activities have these. Rests are excluded by default.
     """
     return service.get_sets(activity_id, include_rests=include_rests)
+
+
+@router.get("/{activity_id}/laps", operation_id="get_activity_laps", response_model=ActivityLaps)
+def get_laps(activity_id: int = Path(gt=0)) -> ActivityLaps:
+    """Laps for a run or ride, and pace per 100 of the pool's unit for a pool swim.
+
+    With a summary: average pace or speed, first half against second half,
+    and the fastest and slowest lap or 100. Answers "did my pace hold up?".
+    """
+    return service.laps(activity_id)
+
+
+@router.patch("/{activity_id}/sets", operation_id="edit_activity_sets", response_model=ActivitySets)
+def edit_sets(edit: SetEdit, activity_id: int = Path(gt=0)) -> ActivitySets:
+    """Correct a strength activity's sets: exercise, reps or weight, or delete sets.
+
+    Address sets by the set_number get_activity_sets shows. Name exercises
+    with Garmin's category and exercise_name; find_exercise looks them up.
+    Returns the sets as Garmin now holds them.
+    """
+    return service.edit_sets(activity_id, edit)
 
 
 @router.get("/{activity_id}/splits", operation_id="get_activity_splits")
