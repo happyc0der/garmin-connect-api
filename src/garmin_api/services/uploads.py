@@ -157,10 +157,15 @@ def _log(spec: StrengthSessionSpec, *, rename: bool, serial: int | None) -> dict
         others = sorted((already_there or set()) - {activity_id})
         if others:
             result["also_at_this_time"] = others
-            result["note"] = (
-                f"Other activities already start at this second: {others}. If one is this "
-                "same session, delete the extra with delete_activity."
-            )
+            if "note" in result:
+                # Rate limited already: say what is there, but ask for no
+                # further call against a throttled account.
+                result["note"] += f" Other activities also start at this second: {others}."
+            else:
+                result["note"] = (
+                    f"Other activities already start at this second: {others}. If one is this "
+                    "same session, delete the extra with delete_activity."
+                )
     elif result.get("status") in ("accepted", "processed"):
         result["note"] = (
             "Garmin is still processing the upload, so its name and notes are not applied "

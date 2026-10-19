@@ -37,6 +37,8 @@ WINDOW_DAYS = {
     "get_daily_body_battery_stats": 28,
     "get_hrv_data_range": 365,
     "get_training_readiness_range": 28,
+    # The library documents about a year per request for resting heart rate.
+    "get_rhr_daily": 365,
 }
 
 
@@ -124,7 +126,9 @@ def _rows(fn_name: str, start: date, end: date, key: str | None = None) -> list[
         reply = auth.call(fn_name, s, e)
         if key is not None:
             reply = reply.get(key) if isinstance(reply, dict) else None
-        rows.extend(reply or [])
+        elif isinstance(reply, dict):
+            reply = [reply]  # a single entry, as readiness sometimes answers
+        rows.extend(r for r in reply or [] if isinstance(r, dict))
     return rows
 
 
@@ -141,7 +145,7 @@ def _daily(metric: Metric, start: date, end: date, aggregation: Aggregation) -> 
                 )
 
     elif metric is Metric.resting_hr:
-        for row in auth.call("get_rhr_daily", s, e) or []:
+        for row in _rows("get_rhr_daily", start, end):
             day, value = _day(row.get("calendarDate")), row.get("value")
             if day and value:
                 points.append(Point(period=day, value=float(value)))
@@ -217,8 +221,17 @@ def _daily(metric: Metric, start: date, end: date, aggregation: Aggregation) -> 
                 kg = grams_to_kg(latest["weight"])
                 if kg is not None:
                     points.append(Point(period=day, value=round(kg, 2)))
-            elif metric is Metric.body_fat and latest.get("bodyFat") is not None:
-                points.append(Point(period=day, value=float(latest["bodyFat"])))
+            elif metric is Metric.body_fat:
+                # The day's last reading with body fat in it: a plain weigh-in
+                # after a scale's full reading must not lose the day's figure.
+                readings = [
+                    m
+                    for m in row.get("allWeightMetrics") or [latest]
+                    if isinstance(m, dict) and m.get("bodyFat") is not None
+                ]
+                if readings:
+                    last = max(readings, key=lambda m: m.get("timestampGMT") or m.get("date") or 0)
+                    points.append(Point(period=day, value=float(last["bodyFat"])))
 
     elif metric in (Metric.vo2max, Metric.vo2max_cycling):
         # Garmin recomputes VO2 max only after qualifying runs or rides, so

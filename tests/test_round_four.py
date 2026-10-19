@@ -119,10 +119,10 @@ def test_a_private_reply_is_withheld_data_not_a_bad_login() -> None:
     from garminconnect import GarminConnectAuthenticationError
 
     from garmin_api import auth
-    from garmin_api.errors import NotFound
+    from garmin_api.errors import Withheld
 
     assert isinstance(
-        auth.translate(GarminConnectAuthenticationError("Authentication error")), NotFound
+        auth.translate(GarminConnectAuthenticationError("Authentication error")), Withheld
     )
 
 
@@ -156,6 +156,7 @@ def test_one_failed_connection_does_not_lock_the_server_out(no_real_tokens, monk
             return "me"
 
     monkeypatch.setattr(auth, "Garmin", FlakyGarmin)
+    monkeypatch.setattr(auth, "UNREACHABLE_HOLD_S", 0)  # past the brief hold
     session = auth.Session()
     with pytest.raises(GarminUnavailable):
         session.call("whoami")
@@ -301,3 +302,118 @@ def test_an_unknown_timezone_is_asked_for_again(fake_garmin: dict[str, Any], mon
     with pytest.raises(GarminUnavailable):
         auth.account_zone()
     assert client._time_zone_loaded is False
+
+
+# --- Round five ------------------------------------------------------------------------
+
+
+def test_withheld_stats_are_listed_not_shown_as_an_empty_day(fake_garmin: dict[str, Any]) -> None:
+    from garmin_api.errors import Withheld
+    from garmin_api.services import health
+
+    def private(*_: Any) -> Any:
+        raise Withheld("Garmin marks this data private and did not return it.")
+
+    fake_garmin["responses"].update({"get_stats": private, "get_sleep_data": None})
+    summary = health.day("2026-10-15", parts={"stats", "sleep"})
+    assert summary.unavailable == {"stats": "Garmin marks this data private and did not return it."}
+
+
+def test_a_failed_connect_is_not_repeated_for_every_part_of_the_day(
+    no_real_tokens, monkeypatch
+) -> None:
+    import requests
+    from garminconnect import GarminConnectAuthenticationError
+
+    from garmin_api import auth
+    from garmin_api.services import health
+
+    (no_real_tokens / "garmin_tokens.json").write_text("{}")
+    connects: list[int] = []
+
+    class DownGarmin:
+        def __init__(self) -> None:
+            self.client = type("C", (), {"_tokenstore_path": None})()
+
+        def login(self, tokenstore: str | None = None) -> None:
+            connects.append(1)
+            try:
+                raise requests.ConnectionError("down")
+            except requests.ConnectionError as inner:
+                raise GarminConnectAuthenticationError(
+                    "Failed to retrieve social profile"
+                ) from inner
+
+    monkeypatch.setattr(auth, "Garmin", DownGarmin)
+    monkeypatch.setattr(auth, "_session", auth.Session())
+    with pytest.raises(GarminUnavailable):
+        health.day("2026-10-15")
+    assert len(connects) == 1
+
+
+def test_an_upload_reply_that_cannot_be_read_is_an_error(fake_garmin: dict[str, Any]) -> None:
+    fake_garmin["responses"]["upload_activity"] = {"detailedImportResult": {"processingTime": 12}}
+    response = TestClient(create_app()).post(
+        "/v1/sessions/upload", files={"file": ("a.fit", b"fit")}
+    )
+    assert response.status_code == 502
+    assert "list_activities" in response.json()["detail"]
+
+
+def test_a_proxied_name_accepts_its_own_https_pages(monkeypatch) -> None:
+    """Behind a proxy that ends TLS, the service sees http; its /docs page is https."""
+    monkeypatch.setenv("GARMIN_API_HOSTS", "garmin.example")
+    response = TestClient(create_app()).post(
+        "/v1/health/weight",
+        params={"weight": 80},
+        headers={"Host": "garmin.example", "Origin": "https://garmin.example"},
+    )
+    assert response.status_code != 403
+
+
+def test_the_body_fat_trend_keeps_a_day_whose_last_weigh_in_has_none(
+    fake_garmin: dict[str, Any],
+) -> None:
+    from garmin_api.services import trends
+
+    fake_garmin["responses"]["get_weigh_ins"] = {
+        "dailyWeightSummaries": [
+            {
+                "summaryDate": "2026-10-15",
+                "latestWeight": {"weight": 72000, "bodyFat": None, "timestampGMT": 2},
+                "allWeightMetrics": [
+                    {"weight": 72400, "bodyFat": 18.4, "timestampGMT": 1},
+                    {"weight": 72000, "bodyFat": None, "timestampGMT": 2},
+                ],
+            }
+        ]
+    }
+    trend = trends.trend("body_fat", "2026-10-15", "2026-10-15")
+    assert [p.value for p in trend.points] == [18.4]
+
+
+def test_a_laps_pace_and_its_summary_agree(fake_garmin: dict[str, Any]) -> None:
+    from garmin_api.models.laps import build
+
+    splits = {
+        "lapDTOs": [
+            {"lapIndex": 1, "distance": 1000, "duration": 400, "movingDuration": 300},
+            {"lapIndex": 2, "distance": 1000, "duration": 330, "movingDuration": 330},
+        ]
+    }
+    laps = build(1, "running", splits)
+    assert [lap.pace for lap in laps.laps] == ["5:00/km", "5:30/km"]
+    assert laps.summary["fastest_lap"] == 1
+
+
+def test_the_halves_split_the_distance_not_the_laps() -> None:
+    from garmin_api.models.laps import build
+
+    splits = {
+        "lapDTOs": [
+            {"lapIndex": 1, "distance": 9000, "duration": 2700, "movingDuration": 2700},
+            {"lapIndex": 2, "distance": 1000, "duration": 420, "movingDuration": 420},
+        ]
+    }
+    summary = build(1, "running", splits).summary
+    assert (summary["first_half_pace"], summary["second_half_pace"]) == ("5:00/km", "5:24/km")

@@ -162,7 +162,9 @@ def day(
     # empty. If every part fails, though, that is an outage, not a quiet day.
     failures: list[Exception] = []
 
-    def attempt(fn: Any) -> None:
+    unavailable: dict[str, str] = {}
+
+    def attempt(name: str, fn: Any) -> None:
         try:
             fn()
         except (NotAuthenticated, RateLimited):
@@ -170,6 +172,7 @@ def day(
         except Exception as exc:  # noqa: BLE001 -- deliberately tolerant
             logger.debug("Part of the day failed, leaving it out: %s", exc)
             failures.append(exc)
+            unavailable[name] = getattr(exc, "message", None) or str(exc) or type(exc).__name__
 
     summary = DaySummary(day=parsed_day)
 
@@ -186,7 +189,7 @@ def day(
                 logger.debug("Garmin's %s for %s was %r; left out", field, day_str, value)
 
     if "stats" in parts:
-        attempt(read_stats)
+        attempt("stats", read_stats)
 
     def read_sleep() -> None:
         summary.sleep = sleep(day_str, include_raw=include_raw)
@@ -222,8 +225,10 @@ def day(
         ("weight", read_weight),
     ):
         if name in parts:
-            attempt(reader)
+            attempt(name, reader)
 
+    if unavailable:
+        summary.unavailable = unavailable
     if parts and len(failures) == len(parts):
         first = failures[0]
         if isinstance(first, GarminApiError):
@@ -239,12 +244,16 @@ def morning_readiness(rows: list[Any]) -> dict[str, Any] | None:
 
     Garmin keeps several a day, updating the score as the day goes on; the
     one labelled AFTER_WAKEUP_RESET is the morning score, comparable from day
-    to day. Without it, the first entry with a score.
+    to day. Without it, the earliest entry with a score, whatever order
+    Garmin lists them in.
     """
     scored = [r for r in rows if isinstance(r, dict) and r.get("score") is not None]
     for row in scored:
         if row.get("inputContext") == "AFTER_WAKEUP_RESET":
             return row
+    timed = [r for r in scored if r.get("timestamp") or r.get("timestampLocal")]
+    if timed:
+        return min(timed, key=lambda r: str(r.get("timestamp") or r.get("timestampLocal")))
     return scored[0] if scored else None
 
 

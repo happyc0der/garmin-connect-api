@@ -14,7 +14,7 @@ from typing import Any
 from fastapi import APIRouter, File, Query, Response, UploadFile
 from starlette.concurrency import run_in_threadpool
 
-from ...errors import InvalidRequest
+from ...errors import GarminUnavailable, InvalidRequest
 from ...fit import decode_strength_session, encode_strength_session
 from ...models.workouts import StrengthSessionSpec
 from ...services import uploads as service
@@ -43,7 +43,15 @@ def log_strength(spec: StrengthSessionSpec) -> dict[str, Any]:
 
 
 def _refuse_rejected(result: dict[str, Any]) -> dict[str, Any]:
-    """A file Garmin refused is an error, not a 200 with a status inside."""
+    """A file Garmin refused, or a reply that cannot be read, is an error, not a 200.
+
+    The CLI exits 1 for both; HTTP and MCP say the same.
+    """
+    if result.get("status") == "unknown":
+        raise GarminUnavailable(
+            "Garmin's reply to the upload could not be read.",
+            detail="It may have been applied; check list_activities before trying again.",
+        )
     if result.get("status") == "rejected":
         raise InvalidRequest(
             "Garmin rejected the upload.",

@@ -46,7 +46,6 @@ def add_weigh_in(
     Unlike everywhere else in Garmin's API, this one takes kilograms (or
     pounds) rather than grams.
     """
-    stamp = ""
     if timestamp:
         try:
             moment = (
@@ -58,13 +57,20 @@ def add_weigh_in(
             ) from exc
         if not 1990 <= moment.year <= 2099:
             raise InvalidRequest("A weigh-in must fall between 1990 and 2099.")
-        if moment.tzinfo is not None:
-            # Garmin files a weigh-in under the local date and time it is
-            # given, so an instant in UTC would land on the wrong evening's
-            # day; it is moved into the account's own timezone first.
-            moment = moment.astimezone(auth.account_zone())
-        stamp = moment.isoformat()
-    return auth.call("add_weigh_in", weight, unit, stamp)
+    else:
+        moment = datetime.now(auth.account_zone())
+    if moment.tzinfo is None:
+        # Local time where the account is, never the machine's.
+        moment = auth.in_account_time(moment)
+    else:
+        # Garmin files a weigh-in under the local date and time it is given,
+        # so an instant in UTC would land on the wrong evening's day; it is
+        # moved into the account's timezone when that is known, and otherwise
+        # sent with the offset it came with.
+        zone = auth.account_zone_or_none()
+        if zone is not None:
+            moment = moment.astimezone(zone)
+    return auth.call("add_weigh_in", weight, unit, moment.isoformat())
 
 
 def delete_weigh_in(weight_pk: str, day: date | str) -> Any:

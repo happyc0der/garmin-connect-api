@@ -54,6 +54,15 @@ class NotFound(GarminApiError):
     status = 404
 
 
+class Withheld(GarminApiError):
+    """Garmin has the data but marks it private and will not return it.
+
+    Not "nothing recorded": a day summary must not show it as an empty day.
+    """
+
+    status = 403
+
+
 class InvalidRequest(GarminApiError):
     """The request was wrong before it ever reached Garmin.
 

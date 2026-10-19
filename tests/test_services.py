@@ -369,9 +369,11 @@ class TestWeight:
 
     def test_adding_a_weight_sends_kilograms(self, fake_garmin: dict[str, Any]) -> None:
         """This endpoint is the exception: it takes kg, not grams."""
-        fake_garmin["responses"]["add_weigh_in"] = {}
+        fake_garmin["responses"].update(
+            {"add_weigh_in": {}, "get_user_timezone": "America/New_York"}
+        )
         weight.add_weigh_in(81.4)
-        _, args = fake_garmin["calls"][0]
+        args = next(a for name, a in fake_garmin["calls"] if name == "add_weigh_in")
         assert args[0] == 81.4
         assert args[1] == "kg"
 
