@@ -152,9 +152,51 @@ def test_a_page_on_the_service_itself_can_write(monkeypatch) -> None:
     monkeypatch.setattr(weight, "add_weigh_in", lambda *a, **k: {})
     client = TestClient(create_app())
     response = client.post(
-        "/v1/health/weight", params={"weight": 80}, headers={"Origin": "http://127.0.0.1:8765"}
+        "/v1/health/weight",
+        params={"weight": 80},
+        headers={"Origin": "http://127.0.0.1:8765", "Host": "127.0.0.1:8765"},
     )
     assert response.status_code == 200
+
+
+@pytest.mark.parametrize("origin", ["http://localhost:3000", "http://127.0.0.1:5173", "null"])
+def test_a_page_served_from_another_local_port_cannot_write(origin: str, monkeypatch) -> None:
+    """Any dev server on this machine is another site, not the service."""
+    from garmin_api.services import weight
+
+    written: list[Any] = []
+    monkeypatch.setattr(weight, "add_weigh_in", lambda *a, **k: written.append(a) or {})
+    response = TestClient(create_app()).post(
+        "/v1/health/weight",
+        params={"weight": 80},
+        headers={"Origin": origin, "Host": "127.0.0.1:8765"},
+    )
+    assert response.status_code == 403
+    assert written == []
+
+
+@pytest.mark.parametrize("host", ["[::1]", "[::1]:8765", "localhost", "127.0.0.1:8765"])
+def test_local_host_names_are_answered(host: str) -> None:
+    response = TestClient(create_app()).get("/healthz", headers={"Host": host})
+    assert response.status_code == 200
+
+
+def test_an_unexpected_failure_is_a_json_500_not_a_raised_exception(monkeypatch) -> None:
+    from garmin_api.services import workouts
+
+    def broken(*_: Any, **__: Any) -> Any:
+        raise ZeroDivisionError("float division by zero")
+
+    monkeypatch.setattr(workouts, "list_workouts", broken)
+    response = TestClient(create_app(), raise_server_exceptions=True).get("/v1/workouts")
+    assert response.status_code == 500
+    assert response.json()["error"] == "ZeroDivisionError"
+
+
+def test_garmin_replying_in_an_unexpected_shape_is_a_502(fake_garmin: dict[str, Any]) -> None:
+    fake_garmin["responses"]["get_workouts"] = [{"workoutId": 1, "workoutName": {"no": "str"}}]
+    response = TestClient(create_app()).get("/v1/workouts")
+    assert response.status_code == 502, response.text
 
 
 def test_a_rebound_host_name_is_refused() -> None:

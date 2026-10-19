@@ -6,6 +6,7 @@ workout, with its sets, becoming an activity in the history.
 
 from __future__ import annotations
 
+import re
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -33,7 +34,17 @@ def log_strength(spec: StrengthSessionSpec) -> dict[str, Any]:
     exercise catalogue first if unsure. Uploading the same session twice is
     reported as a duplicate rather than creating a second activity.
     """
-    return service.log_strength_session(spec)
+    return _refuse_rejected(service.log_strength_session(spec))
+
+
+def _refuse_rejected(result: dict[str, Any]) -> dict[str, Any]:
+    """A file Garmin refused is an error, not a 200 with a status inside."""
+    if result.get("status") == "rejected":
+        raise InvalidRequest(
+            "Garmin rejected the upload.",
+            detail=" ".join(m for m in result.get("messages") or [] if m) or None,
+        )
+    return result
 
 
 @router.post("/upload", operation_id="upload_activity_file")
@@ -51,12 +62,13 @@ async def upload(
             detail="Garmin accepts .fit, .gpx and .tcx.",
         )
     with tempfile.TemporaryDirectory() as tmp:
-        # Only the bare name, never the client's path: "../../x.fit" or an
-        # absolute path would otherwise be written outside the temp directory.
-        safe = Path(file.filename or "").name or f"activity{suffix}"
-        target = Path(tmp) / safe
+        # Only a tame version of the bare name, never the client's path:
+        # "../../x.fit" would land outside the temp directory, and a long
+        # name or one with ":" fails to be written at all on some systems.
+        stem = re.sub(r"[^A-Za-z0-9_-]+", "_", Path(file.filename or "").stem).strip("_")
+        target = Path(tmp) / f"{stem[:64] or 'activity'}{suffix}"
         target.write_bytes(await file.read())
-        return service.upload_file(target)
+        return _refuse_rejected(service.upload_file(target))
 
 
 @router.post("/strength/encode", operation_id="encode_strength_session_to_fit")

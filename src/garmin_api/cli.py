@@ -23,6 +23,9 @@ app = typer.Typer(
     add_completion=False,
     help="Read and write Garmin Connect: activities, health data, workouts and sessions.",
     no_args_is_help=True,
+    # A traceback must never print local variables: in `garmin login` one of
+    # them is the password.
+    pretty_exceptions_show_locals=False,
 )
 workout_app = typer.Typer(help="Planned workouts and the calendar.", no_args_is_help=True)
 app.add_typer(workout_app, name="workout")
@@ -57,9 +60,35 @@ def _run(fn: Any, *args: Any, **kwargs: Any) -> Any:
 
 
 def _read(path: Path) -> str:
-    if not path.is_file():
-        raise _fail(f"No such file: {path}")
-    return path.read_text()
+    """A spec file's text: UTF-8, with or without a byte-order mark, or UTF-16.
+
+    Never the locale's encoding, which on Windows mangles anything past ASCII;
+    and PowerShell 5.1 writes UTF-16 with `>`.
+    """
+    data = _read_bytes(path)
+    encoding = "utf-16" if data[:2] in (b"\xff\xfe", b"\xfe\xff") else "utf-8-sig"
+    try:
+        return data.decode(encoding)
+    except UnicodeDecodeError as exc:
+        raise _fail(f"{path} is not UTF-8 text.", "Save the spec file as UTF-8.") from exc
+
+
+def _write(target: Path, data: bytes, default_name: str) -> Path:
+    """Write output to a file, or into a directory under its default name."""
+    if target.is_dir():
+        target = target / default_name
+    try:
+        target.write_bytes(data)
+    except OSError as exc:
+        raise _fail(f"Could not write {target}: {exc.strerror or exc}") from exc
+    return target
+
+
+def _print_upload(result: dict[str, Any]) -> None:
+    """Print an upload's outcome, exiting 1 if Garmin refused it or answered oddly."""
+    _print(result)
+    if result.get("status") in ("rejected", "unknown"):
+        raise typer.Exit(code=1)
 
 
 def _read_bytes(path: Path) -> bytes:
@@ -190,8 +219,8 @@ def download(activity_id: int, fmt: Format = Format.fit, out: Path | None = None
 
     data = _run(service.download, activity_id, fmt.value)
     suffix = "zip" if fmt is Format.fit else fmt.value
-    target = out or Path(f"activity_{activity_id}.{suffix}")
-    target.write_bytes(data)
+    name = f"activity_{activity_id}.{suffix}"
+    target = _write(out or Path(name), data, name)
     typer.echo(f"Wrote {len(data)} bytes to {target}")
 
 
@@ -205,7 +234,7 @@ def day(when: datetime = typer.Argument(..., formats=["%Y-%m-%d"])) -> None:
 
 
 @app.command()
-def exercises(query: str, limit: int = 15) -> None:
+def exercises(query: str, limit: int = typer.Option(15, min=1, max=100)) -> None:
     """Search Garmin's exercise catalogue. Works offline and logged out."""
     _print([e._asdict() for e in catalogue.search(query, limit=limit)])
 
@@ -215,7 +244,7 @@ def upload(path: Path) -> None:
     """Upload an activity file (.fit, .gpx or .tcx) to Garmin Connect."""
     from .services import uploads as service
 
-    _print(_run(service.upload_file, path))
+    _print_upload(_run(service.upload_file, path))
 
 
 @app.command("log-session")
@@ -229,7 +258,7 @@ def log_session(spec_file: Path) -> None:
     from .services import uploads as service
 
     spec = _run(StrengthSessionSpec.model_validate_json, _read(spec_file))
-    _print(_run(service.log_strength_session, spec))
+    _print_upload(_run(service.log_strength_session, spec))
 
 
 @app.command("encode-session")
@@ -243,8 +272,8 @@ def encode_session(spec_file: Path, out: Path = Path("session.fit")) -> None:
     from .models.workouts import StrengthSessionSpec
 
     spec = _run(StrengthSessionSpec.model_validate_json, _read(spec_file))
-    out.write_bytes(_run(encode_strength_session, spec))
-    typer.echo(f"Wrote {out} ({spec.total_sets} sets)")
+    target = _write(out, _run(encode_strength_session, spec), "session.fit")
+    typer.echo(f"Wrote {target} ({spec.total_sets} sets)")
 
 
 @app.command("decode-fit")
@@ -306,9 +335,43 @@ def serve(host: str = "127.0.0.1", port: int = 8765, reload: bool = False) -> No
     Localhost only by default. Binding anywhere else needs GARMIN_API_KEY set,
     since the service can write to the Garmin account.
     """
-    import os
+    import uvicorn
+
+    _refuse_open_bind(host)
+    typer.echo(f"Docs at http://{host}:{port}/docs")
+    uvicorn.run("garmin_api.http.app:app", host=host, port=port, reload=reload)
+
+
+@app.command()
+def mcp(
+    http: bool = typer.Option(False, help="Serve over HTTP instead of stdio."),
+    host: str = typer.Option("127.0.0.1", help="With --http: the address to bind."),
+    port: int = typer.Option(8000, help="With --http: the port."),
+) -> None:
+    """Run the MCP server.
+
+    Speaks stdio by default, which is what Claude Code and Claude Desktop
+    expect. Over HTTP it is guarded like `garmin serve`: localhost only unless
+    GARMIN_API_KEY is set, and then every request must present that key.
+    """
+    from .mcp import create_mcp
+
+    server = create_mcp()
+    if not http:
+        server.run(transport="stdio", show_banner=False)
+        return
 
     import uvicorn
+
+    _refuse_open_bind(host)
+    typer.echo(f"MCP over HTTP at http://{host}:{port}/mcp", err=True)
+    # create_mcp's http_app carries the same guard as `garmin serve`.
+    uvicorn.run(server.http_app(), host=host, port=port)
+
+
+def _refuse_open_bind(host: str) -> None:
+    """Both servers can write to the account; beyond localhost they need a key."""
+    import os
 
     if host not in {"127.0.0.1", "localhost", "::1"} and not os.getenv("GARMIN_API_KEY"):
         typer.secho(
@@ -317,22 +380,6 @@ def serve(host: str = "127.0.0.1", port: int = 8765, reload: bool = False) -> No
             err=True,
         )
         raise typer.Exit(code=2)
-
-    typer.echo(f"Docs at http://{host}:{port}/docs")
-    uvicorn.run("garmin_api.http.app:app", host=host, port=port, reload=reload)
-
-
-@app.command()
-def mcp(http: bool = typer.Option(False, help="Serve over HTTP instead of stdio.")) -> None:
-    """Run the MCP server.
-
-    Speaks stdio by default, which is what Claude Code and Claude Desktop
-    expect.
-    """
-    from .mcp import create_mcp
-
-    server = create_mcp()
-    server.run(transport="http" if http else "stdio", show_banner=False)
 
 
 @app.command()
