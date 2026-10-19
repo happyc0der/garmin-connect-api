@@ -13,7 +13,7 @@ from typing import Any
 
 from pydantic import Field, field_validator
 
-from .common import ApiModel, first, parse_date, parse_dt
+from .common import ApiModel, WriteSpec, first, parse_date, parse_dt
 
 
 class SleepSummary(ApiModel):
@@ -37,8 +37,10 @@ class SleepSummary(ApiModel):
         overall = scores.get("overall") or {}
         return cls(
             day=parse_date(first(daily, "calendarDate", "calendar_date")),
-            start=parse_dt(first(daily, "sleepStartTimestampGMT", "sleepStartTimestampLocal")),
-            end=parse_dt(first(daily, "sleepEndTimestampGMT", "sleepEndTimestampLocal")),
+            # GMT only: the Local fields are wall-clock times dressed as epochs,
+            # and read as instants they land hours out.
+            start=parse_dt(first(daily, "sleepStartTimestampGMT")),
+            end=parse_dt(first(daily, "sleepEndTimestampGMT")),
             total_sleep_s=first(daily, "sleepTimeSeconds"),
             deep_s=first(daily, "deepSleepSeconds"),
             light_s=first(daily, "lightSleepSeconds"),
@@ -148,7 +150,7 @@ class DaySummary(ApiModel):
     average_stress: int | None = None
     body_battery_high: int | None = None
     body_battery_low: int | None = None
-    hrv_last_night_avg: int | None = None
+    hrv_last_night_avg: float | None = None
     hrv_status: str | None = None
     training_readiness: int | None = Field(
         default=None, description="The morning score Garmin sets on waking."
@@ -185,13 +187,14 @@ class HrvSummary(ApiModel):
     """One night's heart rate variability, without the five-minute readings."""
 
     day: date | None = None
-    last_night_avg: int | None = None
-    last_night_5min_high: int | None = None
-    weekly_avg: int | None = None
+    # Milliseconds. Garmin's own typed model allows fractions.
+    last_night_avg: float | None = None
+    last_night_5min_high: float | None = None
+    weekly_avg: float | None = None
     status: str | None = Field(default=None, description='e.g. "BALANCED", "LOW", "UNBALANCED".')
-    baseline_low_upper: int | None = None
-    baseline_balanced_low: int | None = None
-    baseline_balanced_upper: int | None = None
+    baseline_low_upper: float | None = None
+    baseline_balanced_low: float | None = None
+    baseline_balanced_upper: float | None = None
     readings: list[dict[str, Any]] | None = Field(
         default=None, description="The five-minute readings, only when asked for."
     )
@@ -374,7 +377,7 @@ class PersonalRecord(ApiModel):
         )
 
 
-class BodyCompositionSpec(ApiModel):
+class BodyCompositionSpec(WriteSpec):
     """One weigh-in with body composition, to write to Garmin.
 
     Written as a FIT weight-scale file, which is how Garmin's own Index scales

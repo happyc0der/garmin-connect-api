@@ -18,6 +18,22 @@ class ApiModel(BaseModel):
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
 
+class WriteSpec(ApiModel):
+    """Base for what a caller sends to be written to Garmin.
+
+    Unknown keys are refused rather than ignored: a misspelt or misplaced
+    field would otherwise vanish and the write go ahead without it, such as
+    a set saved as plain "Row" because the exercise came under another key.
+    """
+
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+
+
+# The exercise search returns the variant as "exercise"; the write specs call
+# it "exercise_name". Either is accepted, so a search result can be passed on.
+EXERCISE_NAME_KEYS = ("exercise_name", "exercise")
+
+
 class Paging(BaseModel):
     start: int = 0
     limit: int = 20

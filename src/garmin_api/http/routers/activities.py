@@ -27,7 +27,8 @@ def list_activities(
 ) -> list[ActivitySummary]:
     """List activities, newest first.
 
-    Filter by type and by date range. For strength workouts pass
+    Completed activities, not planned workouts. Filter by type and by date
+    range; end_date needs start_date. For strength sessions pass
     activity_type=strength_training, then fetch the sets of one to see the
     exercises, reps and weights.
     """
@@ -137,6 +138,9 @@ def update(
 
 @router.delete("/{activity_id}", operation_id="delete_activity")
 def delete(activity_id: int = Path(gt=0)) -> dict[str, Any]:
-    """Permanently delete an activity. Garmin Connect offers no undo."""
+    """Permanently delete an activity. Garmin Connect offers no undo.
+
+    A copy already shared to Strava or another connected app stays there.
+    """
     service.delete(activity_id)
     return {"activity_id": activity_id, "status": "deleted"}

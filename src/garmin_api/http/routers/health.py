@@ -37,7 +37,10 @@ def day_summary(day: date) -> DaySummary:
 
 @router.get("/sleep/{day}", operation_id="get_sleep", response_model=SleepSummary | None)
 def sleep(day: date) -> SleepSummary | None:
-    """Sleep for one night, with stage breakdown and score."""
+    """Sleep for one night, with stage breakdown and score.
+
+    A night belongs to the day it ended on: last night is today's date.
+    """
     return service.sleep(day)
 
 
@@ -46,7 +49,10 @@ def hrv(
     day: date,
     include_readings: bool = Query(False, description="Add the five-minute readings."),
 ) -> HrvSummary | None:
-    """Heart rate variability for one night: average, status and baseline."""
+    """Heart rate variability for one night: average, status and baseline.
+
+    A night belongs to the day it ended on: last night is today's date.
+    """
     return service.hrv_summary(day, include_readings=include_readings)
 
 
@@ -149,10 +155,16 @@ def get_trend(
 ) -> Trend:
     """How one metric moved over a range, with average, extremes and change.
 
-    Metrics: steps, resting_hr, sleep (hours), sleep_score, hrv, readiness,
-    stress, body_battery, weight, body_fat, vo2max (running), vo2max_cycling.
-    Up to two months comes back daily, up to a year weekly, longer monthly;
-    usually one request to Garmin. Ranges are limited to two years.
+    Metrics: steps, resting_hr, sleep (hours), sleep_score, hrv, readiness
+    (the morning score), stress (the day's average), body_battery (the day's
+    high), weight, body_fat, vo2max (running), vo2max_cycling. Up to two months
+    comes back daily, up to a year weekly, longer monthly. Ranges are limited
+    to two years; stress, body battery and readiness are fetched four weeks per
+    request, so long ranges of those take several.
+
+    The summary gives days_with_data (periods_with_data for VO2 max, which
+    Garmin groups itself), the average, min and max of the days, the first and
+    last day, and change: the last period's average minus the first's.
     """
     from ...services import trends
 

@@ -69,7 +69,8 @@ Five features, each checked against a real account.
 ### Foundations
 
 - **Library, HTTP service and MCP server over one core.** The MCP tools are generated from the
-  FastAPI routes, so every endpoint is a tool with the same name and description.
+  FastAPI routes, so each tool has its route's name and description (bulk downloads and file
+  conversions stay HTTP-only).
 - **Read:** activities with per-set strength detail and training volume; daily health (steps,
   heart rate, stress as minutes per band, body battery, sleep with stages, HRV, training readiness
   and status); every weigh-in with body composition; original activity files.

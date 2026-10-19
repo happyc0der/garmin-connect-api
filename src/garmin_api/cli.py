@@ -98,7 +98,9 @@ def _read_bytes(path: Path) -> bytes:
 
 
 @app.command()
-def login(email: str = typer.Option(..., prompt="Garmin email")) -> None:
+def login(
+    email: str = typer.Option(..., prompt="Garmin email", help="Asked for if not given."),
+) -> None:
     """Log in to Garmin and store tokens for the service and the MCP.
 
     The password is prompted for, never taken as an argument, so it does not
@@ -252,7 +254,8 @@ def log_session(spec_file: Path) -> None:
     """Log a completed strength session from a JSON file.
 
     The file describes the session: a name, a start_time with a timezone, and
-    a list of exercises each with their sets. See the README for the shape.
+    a list of exercises each with their sets. An example:
+    https://github.com/happyc0der/garmin-connect-api/blob/main/examples/session.json
     """
     from .models.workouts import StrengthSessionSpec
     from .services import uploads as service
@@ -333,7 +336,8 @@ def serve(host: str = "127.0.0.1", port: int = 8765, reload: bool = False) -> No
     """Run the HTTP service.
 
     Localhost only by default. Binding anywhere else needs GARMIN_API_KEY set,
-    since the service can write to the Garmin account.
+    since the service can write to the Garmin account, and the host name
+    clients use listed in GARMIN_API_HOSTS.
     """
     import uvicorn
 
@@ -352,7 +356,8 @@ def mcp(
 
     Speaks stdio by default, which is what Claude Code and Claude Desktop
     expect. Over HTTP it is guarded like `garmin serve`: localhost only unless
-    GARMIN_API_KEY is set, and then every request must present that key.
+    GARMIN_API_KEY is set, and then every request must present that key and
+    name a host listed in GARMIN_API_HOSTS.
     """
     from .mcp import create_mcp
 
@@ -370,7 +375,10 @@ def mcp(
 
 
 def _refuse_open_bind(host: str) -> None:
-    """Both servers can write to the account; beyond localhost they need a key."""
+    """Both servers can write to the account; beyond localhost they need a key.
+
+    Clients must then also use a host name listed in GARMIN_API_HOSTS.
+    """
     import os
 
     if host not in {"127.0.0.1", "localhost", "::1"} and not os.getenv("GARMIN_API_KEY"):

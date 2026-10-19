@@ -27,9 +27,9 @@ def list_activities(
 ) -> list[ActivitySummary]:
     """List activities, newest first.
 
-    With a date range Garmin uses a different endpoint that ignores paging, so
-    ``limit`` is applied here instead. ``activity_type`` takes Garmin's own
-    keys, e.g. ``strength_training``, ``running``, ``cycling``.
+    With a date range this asks Garmin's search endpoint for one page of
+    ``limit`` rows; ``end_date`` needs ``start_date``. ``activity_type`` takes
+    Garmin's own keys, e.g. ``strength_training``, ``running``, ``cycling``.
     """
     if end_date and not start_date:
         raise InvalidRequest(

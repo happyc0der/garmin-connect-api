@@ -10,9 +10,17 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Self
 
-from pydantic import Field, computed_field, model_validator
+from pydantic import AliasChoices, Field, computed_field, model_validator
 
-from .common import ApiModel, first, grams_to_kg, parse_dt, parse_local
+from .common import (
+    EXERCISE_NAME_KEYS,
+    ApiModel,
+    WriteSpec,
+    first,
+    grams_to_kg,
+    parse_dt,
+    parse_local,
+)
 
 STRENGTH_TYPES = frozenset({"strength_training"})
 
@@ -142,10 +150,11 @@ class StrengthSet(ApiModel):
     def from_garmin(
         cls, payload: dict[str, Any], *, index: int | None = None, include_raw: bool = False
     ) -> StrengthSet:
-        # Garmin nests the exercise under a list, ranked by its own guess at
-        # what the wrist movement was. The first entry is the chosen one.
-        exercises = payload.get("exercises") or []
-        chosen = exercises[0] if exercises else {}
+        # Garmin nests the exercise under a list of guesses at what the wrist
+        # movement was, each with a probability. Nothing says the list is
+        # sorted, so the likeliest is taken; with no probabilities, the first.
+        exercises = [e for e in payload.get("exercises") or [] if isinstance(e, dict)]
+        chosen = max(exercises, key=lambda e: e.get("probability") or 0, default={})
         return cls(
             set_number=index,
             message_index=payload.get("messageIndex"),
@@ -205,7 +214,7 @@ class ActivitySets(ApiModel):
         return cls(activity_id=activity_id, sets=sets)
 
 
-class SetChange(ApiModel):
+class SetChange(WriteSpec):
     """A change to one or more working sets, by their set_number.
 
     Give the exercise as Garmin's category and exercise_name pair; leave out
@@ -217,7 +226,12 @@ class SetChange(ApiModel):
     )
     category: str | None = Field(default=None, description='e.g. "ROW".')
     exercise_name: str | None = Field(
-        default=None, description='e.g. "DUMBBELL_ROW". Empty for just the category.'
+        default=None,
+        validation_alias=AliasChoices(*EXERCISE_NAME_KEYS),
+        description=(
+            'e.g. "DUMBBELL_ROW", as find_exercise gives it under "exercise". '
+            "Empty for just the category."
+        ),
     )
     reps: int | None = Field(default=None, ge=0, le=999)
     weight_kg: float | None = Field(default=None, ge=0, le=1000)
@@ -231,7 +245,7 @@ class SetChange(ApiModel):
         return self
 
 
-class SetEdit(ApiModel):
+class SetEdit(WriteSpec):
     """Corrections to an activity's sets: change some, delete some, or both."""
 
     changes: list[SetChange] = Field(default_factory=list)

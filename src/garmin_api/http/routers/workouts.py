@@ -53,7 +53,8 @@ def create_strength(spec: StrengthWorkoutSpec) -> WorkoutSummary:
     exercises with Garmin's category and exercise name, which the exercise
     search endpoint can find; an unknown name is rejected with suggestions.
 
-    Give schedule_date to put it on the calendar in the same call.
+    Without schedule_date it is saved, not scheduled. With it, it is put on
+    the calendar in the same call, and the reply carries the schedule_id.
     """
     return service.create_strength(spec)
 
@@ -66,7 +67,7 @@ def create_endurance(spec: EnduranceWorkoutSpec) -> WorkoutSummary:
     and rides take a target: pace per km or mile, speed, heart-rate zone or
     range, power zone or watts, or cadence. Swims take a stroke, equipment and
     a pool length; distances must be whole lengths. Give schedule_date to put
-    it on the calendar too.
+    it on the calendar too; the reply then carries the schedule_id.
     """
     return service.create_endurance(spec)
 
@@ -75,7 +76,11 @@ def create_endurance(spec: EnduranceWorkoutSpec) -> WorkoutSummary:
 def create_raw(
     workout: dict[str, Any] = Body(description="A complete Garmin workout DTO."),
 ) -> WorkoutSummary:
-    """Create a workout from a full Garmin DTO, for shapes the builder omits."""
+    """Create a workout from a full Garmin DTO, for shapes the builder omits.
+
+    Sent to Garmin as given: exercise names are not checked against the
+    catalogue here, so prefer create_strength_workout where it can express it.
+    """
     return service.create_raw(workout)
 
 
