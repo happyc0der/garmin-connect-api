@@ -322,13 +322,15 @@ class Session:
             # Read before building: a login landing while this one builds is
             # then seen as new on the next call, not taken for these tokens.
             marker = _login_marker(self._tokens)
-            before = self._stored()
             client = Garmin()
             try:
                 client.login(tokenstore=str(self._tokens))
             except Exception as exc:  # noqa: BLE001 -- re-raised as our own type
                 if _refusal(exc):
-                    self._refused = (*before, time.monotonic())
+                    # The marker from before, which a login landing meanwhile
+                    # would change; the token file as it is now, after any
+                    # refresh the library wrote while trying.
+                    self._refused = (marker, self._stored()[1], time.monotonic())
                 error = translate(exc)
                 if isinstance(error, RateLimited):
                     # Calls queued behind this one would each try again.
@@ -410,6 +412,8 @@ class Session:
         with self._lock:
             self._discard()
             self._refused = None
+            self._cooling_until = 0.0
+            self._unreachable_until = 0.0
 
 
 def _is_unauthorized(exc: Exception) -> bool:
@@ -488,7 +492,7 @@ def account_zone_or_none() -> Any:
             f"The account's timezone, {name}, is not in this machine's timezone database.",
             detail="Install the tzdata package, or give times with their UTC offset.",
         ) from exc
-    except ValueError:  # a malformed name
+    except (ValueError, OSError):  # a malformed name, or a directory such as "America"
         logger.debug("Garmin gave an unusable timezone: %r", name)
         return None
 

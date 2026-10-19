@@ -417,3 +417,85 @@ def test_the_halves_split_the_distance_not_the_laps() -> None:
     }
     summary = build(1, "running", splits).summary
     assert (summary["first_half_pace"], summary["second_half_pace"]) == ("5:00/km", "5:24/km")
+
+
+# --- The final check of 0.2.5 -------------------------------------------------------------
+
+
+def test_a_utc_weigh_in_is_refused_when_the_accounts_day_is_unknown(
+    fake_garmin: dict[str, Any],
+) -> None:
+    from garmin_api.services import weight
+
+    fake_garmin["responses"].update({"add_weigh_in": {}, "get_user_timezone": None})
+    with pytest.raises(GarminUnavailable, match="UTC"):
+        weight.add_weigh_in(72.4, timestamp="2026-10-19T02:00:00Z")
+    assert "add_weigh_in" not in [c[0] for c in fake_garmin["calls"]]
+
+
+def test_a_directory_name_for_a_timezone_is_unknown_not_a_crash(
+    fake_garmin: dict[str, Any],
+) -> None:
+    from garmin_api import auth
+
+    fake_garmin["responses"]["get_user_timezone"] = "America"
+    assert auth.account_zone_or_none() is None
+
+
+def test_a_new_login_clears_the_holds(no_real_tokens, monkeypatch) -> None:
+    from garmin_api import auth
+
+    session = auth.Session()
+    session._unreachable_until = float("inf")
+    session._cooling_until = float("inf")
+    session.reset()
+    assert (session._unreachable_until, session._cooling_until) == (0.0, 0.0)
+
+
+@pytest.mark.parametrize(
+    ("scheme", "origin"),
+    [("https", "http://garmin.example"), ("http", "app://garmin.example")],
+)
+def test_odd_origin_schemes_are_foreign(scheme: str, origin: str, monkeypatch) -> None:
+    monkeypatch.setenv("GARMIN_API_HOSTS", "garmin.example")
+    response = TestClient(create_app(), base_url=f"{scheme}://garmin.example").post(
+        "/v1/health/weight",
+        params={"weight": 80},
+        headers={"Host": "garmin.example", "Origin": origin},
+    )
+    assert response.status_code == 403
+
+
+def test_a_refusal_is_held_across_the_librarys_own_token_write(no_real_tokens, monkeypatch) -> None:
+    """Loading tokens may refresh and rewrite the file before the 401 that refuses them."""
+    from types import SimpleNamespace
+
+    from garminconnect import GarminConnectAuthenticationError
+
+    from garmin_api import auth
+    from garmin_api.errors import NotAuthenticated
+
+    token = no_real_tokens / "garmin_tokens.json"
+    token.write_text("{}")
+    built: list[int] = []
+
+    class RefreshThenRefuse:
+        def __init__(self) -> None:
+            built.append(1)
+            self.client = SimpleNamespace(_tokenstore_path=None)
+
+        def login(self, tokenstore: str | None = None) -> None:
+            token.write_text(f'{{"refreshed": {len(built)}}}')  # the library persisting
+            import os
+
+            os.utime(token, ns=(len(built) * 10**9, len(built) * 10**9))
+            cause = Exception("401")
+            cause.response = SimpleNamespace(status_code=401)  # type: ignore[attr-defined]
+            raise GarminConnectAuthenticationError("Authentication failed") from cause
+
+    monkeypatch.setattr(auth, "Garmin", RefreshThenRefuse)
+    session = auth.Session()
+    for _ in range(4):
+        with pytest.raises(NotAuthenticated):
+            session.client()
+    assert len(built) == 1
