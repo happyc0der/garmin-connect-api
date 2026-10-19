@@ -76,14 +76,17 @@ SESSION = {
 }
 
 
+ACTIVITY_TYPES = [
+    {"typeId": 17, "typeKey": "all", "parentTypeId": None},
+    {"typeId": 29, "typeKey": "fitness_equipment", "parentTypeId": 17},
+    {"typeId": 13, "typeKey": "strength_training", "parentTypeId": 29},
+]
+
+
 @pytest.fixture
 def nothing_there_yet(fake_garmin: dict[str, Any], monkeypatch) -> dict[str, Any]:
-    from tests.test_services import TestAcceptedUploads
-
     monkeypatch.setattr(activities, "_types_cache", None)
-    fake_garmin["responses"].update(
-        {"get_activity_types": TestAcceptedUploads.TYPES, "connectapi": []}
-    )
+    fake_garmin["responses"].update({"get_activity_types": ACTIVITY_TYPES, "connectapi": []})
     return fake_garmin
 
 
