@@ -1,6 +1,11 @@
 # Changelog
 
-## 0.2.0 (unreleased)
+## 0.2.0 (2026-10-19)
+
+First public release. 0.1.0 was prepared but never published; its contents are listed below
+under "Foundations".
+
+### Added
 
 Five features, each checked against a real account.
 
@@ -18,9 +23,7 @@ Five features, each checked against a real account.
 - **Named records.** Personal records now carry a name, a unit and a readable value, such as
   "Fastest 1 km run, 4:47.5", instead of Garmin's bare type number.
 
-## 0.1.0 (unreleased)
-
-First public release.
+### Foundations
 
 - **Library, HTTP service and MCP server over one core.** The MCP tools are generated from the
   FastAPI routes, so every endpoint is a tool with the same name and description.
