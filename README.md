@@ -34,7 +34,8 @@ Claude Code:
 claude mcp add --scope user --transport stdio garmin -- uvx garmin-connect-api
 ```
 
-Claude Desktop, in `claude_desktop_config.json`:
+Claude Desktop, in `claude_desktop_config.json` (in `~/Library/Application Support/Claude/` on
+macOS, `%APPDATA%\Claude\` on Windows):
 
 ```json
 {
@@ -170,7 +171,7 @@ uv venv && uv pip install -e ".[dev]"
 uv run pytest
 ```
 
-175 offline tests, needing no network and no account. They cover the models against real Garmin
+184 offline tests, needing no network and no account, run on Linux, macOS and Windows. They cover the models against real Garmin
 response shapes, the FIT codec's round trip, every one of the 1,527 catalogue exercises against
 the FIT profile, the HTTP routes, and every MCP tool's output against its own advertised schema,
 which strict clients enforce.

@@ -35,7 +35,7 @@ def scheduled(
 
 
 @router.get("/{workout_id}", operation_id="get_workout", response_model=WorkoutSummary)
-def get_workout(workout_id: int) -> WorkoutSummary:
+def get_workout(workout_id: int = Path(gt=0)) -> WorkoutSummary:
     """One saved workout, including its full step structure."""
     return service.get_workout(workout_id)
 
@@ -65,7 +65,7 @@ def create_raw(
     "/{workout_id}/schedule", operation_id="schedule_workout", response_model=ScheduledWorkout
 )
 def schedule(
-    workout_id: int, day: date = Query(description="The date to schedule it on.")
+    workout_id: int = Path(gt=0), day: date = Query(description="The date to schedule it on.")
 ) -> ScheduledWorkout:
     """Put a saved workout on the calendar for a date.
 
@@ -76,14 +76,14 @@ def schedule(
 
 
 @router.delete("/schedule/{schedule_id}", operation_id="unschedule_workout")
-def unschedule(schedule_id: int) -> dict[str, Any]:
+def unschedule(schedule_id: int = Path(gt=0)) -> dict[str, Any]:
     """Remove a calendar entry. Takes the schedule id, not the workout id."""
     service.unschedule(schedule_id)
     return {"schedule_id": schedule_id, "status": "unscheduled"}
 
 
 @router.post("/{workout_id}/push", operation_id="push_workout_to_device")
-def push(workout_id: int, device_id: int | None = Query(None)) -> dict[str, Any]:
+def push(workout_id: int = Path(gt=0), device_id: int | None = Query(None)) -> dict[str, Any]:
     """Send a workout to a watch.
 
     It arrives at the watch's next sync, not immediately. With no device id
@@ -94,7 +94,7 @@ def push(workout_id: int, device_id: int | None = Query(None)) -> dict[str, Any]
 
 
 @router.delete("/{workout_id}", operation_id="delete_workout")
-def delete(workout_id: int) -> dict[str, Any]:
+def delete(workout_id: int = Path(gt=0)) -> dict[str, Any]:
     """Delete a saved workout."""
     service.delete(workout_id)
     return {"workout_id": workout_id, "status": "deleted"}

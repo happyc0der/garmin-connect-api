@@ -226,6 +226,10 @@ class TestBodyCompositionFit:
             "timestamp": self.SPEC.timestamp,
         }
 
+    @pytest.mark.skipif(
+        not hasattr(__import__("time"), "tzset"),
+        reason="time.tzset is POSIX only; Windows lacks it",
+    )
     def test_the_instant_survives_any_machine_timezone(self, monkeypatch) -> None:
         """The upstream encoder used time.mktime, which assumes the machine's zone."""
         import time

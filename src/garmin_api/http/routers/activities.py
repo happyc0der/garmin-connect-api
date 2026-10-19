@@ -5,8 +5,9 @@ from __future__ import annotations
 from datetime import date
 from typing import Any
 
-from fastapi import APIRouter, Query, Response
+from fastapi import APIRouter, Path, Query, Response
 
+from ...errors import InvalidRequest
 from ...models.activities import Activity, ActivitySets, ActivitySummary
 from ...services import activities as service
 
@@ -45,14 +46,14 @@ def last_activity() -> ActivitySummary | None:
 
 
 @router.get("/{activity_id}", operation_id="get_activity", response_model=Activity)
-def get_activity(activity_id: int) -> Activity:
+def get_activity(activity_id: int = Path(gt=0)) -> Activity:
     """One activity's summary: type, timing, distance, heart rate, calories."""
     return service.get_activity(activity_id)
 
 
 @router.get("/{activity_id}/sets", operation_id="get_activity_sets", response_model=ActivitySets)
 def get_sets(
-    activity_id: int,
+    activity_id: int = Path(gt=0),
     include_rests: bool = Query(False, description="Include the rest periods between sets."),
 ) -> ActivitySets:
     """Per-set detail for a strength activity: exercise, reps, weight, duration.
@@ -63,14 +64,14 @@ def get_sets(
 
 
 @router.get("/{activity_id}/splits", operation_id="get_activity_splits")
-def get_splits(activity_id: int) -> Any:
+def get_splits(activity_id: int = Path(gt=0)) -> Any:
     """Lap and split detail."""
     return service.get_splits(activity_id)
 
 
 @router.get("/{activity_id}/file", operation_id="download_activity_file")
 def download(
-    activity_id: int,
+    activity_id: int = Path(gt=0),
     fmt: str = Query("fit", pattern="^(fit|tcx|gpx|csv)$"),
 ) -> Response:
     """Download the activity's file.
@@ -95,11 +96,13 @@ def download(
 
 @router.patch("/{activity_id}", operation_id="update_activity")
 def update(
-    activity_id: int,
+    activity_id: int = Path(gt=0),
     name: str | None = None,
     description: str | None = None,
 ) -> dict[str, Any]:
-    """Rename an activity or change its description."""
+    """Rename an activity or change its description. Give at least one."""
+    if name is None and description is None:
+        raise InvalidRequest("Nothing to update.", detail="Give a name, a description, or both.")
     changed: dict[str, Any] = {}
     if name is not None:
         service.set_name(activity_id, name)
@@ -111,7 +114,7 @@ def update(
 
 
 @router.delete("/{activity_id}", operation_id="delete_activity")
-def delete(activity_id: int) -> dict[str, Any]:
+def delete(activity_id: int = Path(gt=0)) -> dict[str, Any]:
     """Permanently delete an activity. Garmin Connect offers no undo."""
     service.delete(activity_id)
     return {"activity_id": activity_id, "status": "deleted"}

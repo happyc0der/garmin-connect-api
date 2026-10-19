@@ -234,7 +234,7 @@ def _add_convenience_tools(mcp: FastMCP) -> None:
             title="Week summary", read_only_hint=True, idempotent_hint=True, open_world_hint=True
         )
     )
-    def week_summary(end_day: str | None = None) -> dict[str, Any]:
+    def week_summary(end_day: date | None = None) -> dict[str, Any]:
         """Seven days of training and health in one answer.
 
         Covers the week ending on end_day, or today. Gives each day's steps,
@@ -243,7 +243,7 @@ def _add_convenience_tools(mcp: FastMCP) -> None:
         """
         # "Today" in the Garmin profile's timezone, not the machine's or UTC's:
         # after 8pm in New York, UTC is already tomorrow.
-        last = date.fromisoformat(end_day) if end_day else auth.call("today")
+        last = end_day or auth.call("today")
         first = last - timedelta(days=6)
 
         from ..services import health as health_service

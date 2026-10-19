@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import date
 from typing import Any
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Path, Query
 
 from ...models.health import (
     BodyCompositionSpec,
@@ -130,7 +130,7 @@ def add_body_composition(spec: BodyCompositionSpec) -> dict[str, Any]:
 
 @router.delete("/weight/{sample_pk}", operation_id="delete_weigh_in")
 def delete_weigh_in(
-    sample_pk: int, day: date = Query(description="The weigh-in's calendar date.")
+    sample_pk: int = Path(gt=0), day: date = Query(description="The weigh-in's calendar date.")
 ) -> dict[str, Any]:
     """Delete one weigh-in. Takes the sample_pk that list_weigh_ins returns."""
     weight_service.delete_weigh_in(str(sample_pk), day)
