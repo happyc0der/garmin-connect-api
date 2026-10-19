@@ -60,7 +60,8 @@ def trend(
             detail="Ask for a shorter stretch, or for monthly points over two years.",
         )
     chosen = Aggregation(aggregation) if aggregation else choose_aggregation(start_d, end_d)
-    daily = _daily(metric, start_d, end_d, chosen)
+    # One point a day, even if two windows both answered for the day between them.
+    daily = list({p.period: p for p in _daily(metric, start_d, end_d, chosen)}.values())
     native = metric in (Metric.vo2max, Metric.vo2max_cycling)
     # A week or month Garmin grouped itself may be labelled with its first
     # day, before a range that starts partway through it; it still belongs.

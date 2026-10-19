@@ -15,6 +15,8 @@ from datetime import date, timedelta
 from typing import Annotated, Any
 
 from fastmcp import FastMCP
+from fastmcp.exceptions import ToolError
+from fastmcp.server.middleware import Middleware
 from fastmcp.server.providers.openapi import MCPType, RouteMap
 from mcp.types import ToolAnnotations
 from pydantic import Field, ValidationError
@@ -92,6 +94,8 @@ def _annotate(route: Any, component: Any) -> None:
             open_world_hint=True,
         )
     hints.title = _title(str(getattr(route, "operation_id", "") or getattr(component, "name", "")))
+    if isinstance(getattr(component, "parameters", None), dict):
+        component.parameters["additionalProperties"] = False
     if hasattr(component, "annotations"):
         component.annotations = hints
 
@@ -178,8 +182,35 @@ def create_mcp() -> FastMCP:
     )
 
     _add_convenience_tools(mcp)
+    mcp.add_middleware(_RefuseUnknownArguments(mcp))
     _guard_http(mcp)
     return mcp
+
+
+class _RefuseUnknownArguments(Middleware):
+    """Refuse a tool argument the tool does not take, naming it.
+
+    FastMCP builds a generated tool's request from the parameters it knows
+    and drops the rest, so a misspelt one vanished: create_strength_workout
+    with date= instead of schedule_date= saved the workout and never
+    scheduled it, and said nothing.
+    """
+
+    def __init__(self, server: FastMCP) -> None:
+        self.server = server
+
+    async def on_call_tool(self, context: Any, call_next: Any) -> Any:
+        params = context.message
+        tool = await self.server.get_tool(params.name)
+        if tool is not None:
+            known = set((tool.parameters or {}).get("properties") or {})
+            unknown = sorted(set(params.arguments or {}) - known)
+            if unknown:
+                raise ToolError(
+                    f"{params.name} takes no argument named {', '.join(unknown)}. "
+                    f"It takes: {', '.join(sorted(known)) or 'none'}."
+                )
+        return await call_next(context)
 
 
 def _guard_http(mcp: FastMCP) -> None:

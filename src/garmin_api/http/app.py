@@ -18,6 +18,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
@@ -142,6 +143,16 @@ def create_app() -> FastAPI:
     @app.exception_handler(GarminApiError)
     async def _garmin_error(_: Request, exc: GarminApiError) -> JSONResponse:
         return JSONResponse(status_code=exc.status, content=exc.as_dict())
+
+    @app.exception_handler(RequestValidationError)
+    async def _invalid_request(_: Request, exc: RequestValidationError) -> JSONResponse:
+        # FastAPI's own handler echoes each bad input back, and an infinity or
+        # NaN cannot be written as JSON: the refusal itself became a 500.
+        problems = [
+            {"loc": list(error.get("loc", ())), "msg": error.get("msg"), "type": error.get("type")}
+            for error in exc.errors()
+        ]
+        return JSONResponse(status_code=422, content={"detail": problems})
 
     @app.exception_handler(ValidationError)
     async def _unexpected_shape(_: Request, exc: ValidationError) -> JSONResponse:

@@ -369,10 +369,36 @@ def test_an_impossible_epoch_reads_as_no_time() -> None:
     assert parse_dt(-1792300000000) is None
 
 
-def test_an_odd_readiness_score_is_a_502_not_a_broken_body(fake_garmin: dict[str, Any]) -> None:
-    fake_garmin["responses"].update({"get_stats": {}, "get_training_readiness": [{"score": 58.5}]})
+def test_an_odd_readiness_score_leaves_only_readiness_empty(fake_garmin: dict[str, Any]) -> None:
+    """Checked as it lands, so it cannot break the schema, and it costs only its own part."""
+    fake_garmin["responses"].update(
+        {
+            "get_stats": {"totalSteps": 9000},
+            "get_sleep_data": None,
+            "get_hrv_data": None,
+            "get_daily_weigh_ins": None,
+            "get_training_readiness": [{"score": 58.5}],
+        }
+    )
     response = TestClient(create_app()).get("/v1/health/day/2026-01-01")
-    assert response.status_code == 502
+    assert response.status_code == 200
+    assert response.json()["steps"] == 9000
+    assert response.json()["training_readiness"] is None
+
+
+def test_a_day_where_every_part_fails_is_an_outage(fake_garmin: dict[str, Any]) -> None:
+    def down(*_: Any) -> Any:
+        raise GarminUnavailable("Garmin answered with a server error (503).")
+
+    for method in (
+        "get_stats",
+        "get_sleep_data",
+        "get_hrv_data",
+        "get_training_readiness",
+        "get_daily_weigh_ins",
+    ):
+        fake_garmin["responses"][method] = down
+    assert TestClient(create_app()).get("/v1/health/day/2026-01-01").status_code == 502
 
 
 @pytest.mark.parametrize(

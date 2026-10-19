@@ -298,7 +298,8 @@ def _same_words(ours: list[str], theirs: list[str]) -> bool:
     def same(a: str, b: str) -> bool:
         if _singular(a) == _singular(b):
             return True
-        if _singular(a) in vocabulary or a[:1] != b[:1]:
+        # A number is never a typo: "40-degree" is not the 45-degree version.
+        if _singular(a) in vocabulary or a[:1] != b[:1] or any(c.isdigit() for c in a + b):
             return False
         return _edits(a, b) <= (2 if len(b) >= 8 else 1)
 

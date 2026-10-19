@@ -364,3 +364,99 @@ def test_a_sub_second_gap_between_sets_is_not_a_rest() -> None:
 def test_an_unidentified_exercise_says_it_needs_a_name() -> None:
     with pytest.raises(InvalidRequest, match="could not identify"):
         catalogue.validate("UNKNOWN", "UNKNOWN")
+
+
+# --- The round-three fuzz and property rerun ---------------------------------------------
+
+
+def test_a_misspelt_tool_argument_is_refused_not_dropped(fake_garmin: dict[str, Any]) -> None:
+    from fastmcp import Client
+
+    from garmin_api.mcp import create_mcp
+
+    fake_garmin["responses"]["upload_workout"] = {"workoutId": 1, "workoutName": "x"}
+
+    async def call() -> Any:
+        async with Client(create_mcp()) as client:
+            return await client.call_tool(
+                "create_strength_workout",
+                {"name": "x", "exercises": [{"category": "PUSH_UP"}], "date": "2026-10-20"},
+                raise_on_error=False,
+            )
+
+    result = asyncio.run(call())
+    assert result.is_error
+    assert "no argument named date" in result.content[0].text
+    assert fake_garmin["calls"] == [], "nothing reaches Garmin"
+
+
+@pytest.mark.parametrize("bad", ["1e999", "-1e999", "NaN"])
+def test_a_non_finite_number_is_a_422_not_a_500(bad: str) -> None:
+    body = (
+        '{"start_time":"2026-09-21T07:00:00Z","exercises":[{"category":"PUSH_UP",'
+        f'"sets":[{{"reps":5,"weight_kg":{bad}}}]}}]}}'
+    )
+    response = TestClient(create_app()).post(
+        "/v1/sessions/strength", content=body, headers={"content-type": "application/json"}
+    )
+    assert response.status_code == 422
+    assert response.json()["detail"][0]["loc"][-1] == "weight_kg"
+
+
+def test_a_day_two_windows_both_answer_for_counts_once(fake_garmin: dict[str, Any]) -> None:
+    def overlapping(start: str, end: str) -> Any:
+        # Each window also answers for the day before it starts.
+        first = date.fromisoformat(start) - timedelta(days=1)
+        days = (date.fromisoformat(end) - first).days + 1
+        return [
+            {
+                "calendarDate": (first + timedelta(days=i)).isoformat(),
+                "values": {"overallStressLevel": 30},
+            }
+            for i in range(days)
+        ]
+
+    fake_garmin["responses"]["get_daily_stress_stats"] = overlapping
+    trend = trends.trend("stress", "2026-09-01", "2026-10-18", aggregation="day")
+    assert trend.summary["days_with_data"] == 48
+
+
+def test_a_number_is_never_a_typo() -> None:
+    assert catalogue.match("40-degree plank") is None
+    assert catalogue.match("45-degree plank").name == "45-degree Plank"
+
+
+def test_rests_in_a_row_add_up_and_a_long_gap_is_capped() -> None:
+    from fit_tool.fit_file_builder import FitFileBuilder
+    from fit_tool.profile.messages.file_id_message import FileIdMessage
+    from fit_tool.profile.messages.set_message import SetMessage
+    from fit_tool.profile.profile_type import FileType, SetType
+
+    from garmin_api.fit import decode_strength_session
+
+    t0 = datetime(2026, 9, 21, 7, 0, tzinfo=UTC)
+    builder = FitFileBuilder(auto_define=True)
+    file_id = FileIdMessage()
+    file_id.type = FileType.ACTIVITY
+    file_id.serial_number = 1
+    file_id.time_created = round(t0.timestamp() * 1000)
+    builder.add(file_id)
+    plan = [
+        (SetType.ACTIVE, 0, 30),
+        (SetType.REST, 30, 30),
+        (SetType.REST, 60, 15),
+        (SetType.ACTIVE, 75, 30),
+        (SetType.ACTIVE, 75 + 30 + 90_000, 30),  # a day and more later
+    ]
+    for kind, offset, seconds in plan:
+        message = SetMessage()
+        message.set_type = kind
+        message.start_time = round((t0 + timedelta(seconds=offset)).timestamp() * 1000)
+        message.timestamp = round((t0 + timedelta(seconds=offset + seconds)).timestamp() * 1000)
+        message.duration = float(seconds)
+        if kind == SetType.ACTIVE:
+            message.category = [0]
+            message.repetitions = 5
+        builder.add(message)
+    sets = decode_strength_session(bytes(builder.build().to_bytes())).exercises[0].sets
+    assert [s.rest_s for s in sets] == [45.0, 86400.0, None]
