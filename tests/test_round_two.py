@@ -41,12 +41,16 @@ def test_a_short_query_does_not_match_inside_a_word() -> None:
     assert all("Machine" not in e.name for e in catalogue.search("chin"))
 
 
-def test_a_session_without_a_timezone_is_refused() -> None:
-    with pytest.raises(ValueError, match="timezone offset"):
-        StrengthSessionSpec(
-            start_time=datetime(2026, 9, 21, 7, 0),
-            exercises=[{"category": "BENCH_PRESS", "sets": [{"reps": 5}]}],
-        )
+def test_a_session_without_a_timezone_cannot_be_encoded_offline() -> None:
+    from garmin_api.errors import InvalidRequest
+    from garmin_api.fit import encode_strength_session
+
+    spec = StrengthSessionSpec(
+        start_time=datetime(2026, 9, 21, 7, 0),
+        exercises=[{"category": "BENCH_PRESS", "sets": [{"reps": 5}]}],
+    )
+    with pytest.raises(InvalidRequest, match="timezone offset"):
+        encode_strength_session(spec)
 
 
 def test_cli_reports_a_missing_file_without_a_traceback(tmp_path: Path) -> None:

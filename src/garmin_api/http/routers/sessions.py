@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, File, Query, Response, UploadFile
+from starlette.concurrency import run_in_threadpool
 
 from ...errors import InvalidRequest
 from ...fit import decode_strength_session, encode_strength_session
@@ -72,7 +73,9 @@ async def upload(
         stem = re.sub(r"[^A-Za-z0-9_-]+", "_", Path(file.filename or "").stem).strip("_")
         target = Path(tmp) / f"{stem[:64] or 'activity'}{suffix}"
         target.write_bytes(await file.read())
-        return _refuse_rejected(service.upload_file(target))
+        # Off the event loop: an upload takes seconds, and every other request
+        # to the service would wait behind it.
+        return _refuse_rejected(await run_in_threadpool(service.upload_file, target))
 
 
 @router.post("/strength/encode", operation_id="encode_strength_session_to_fit")

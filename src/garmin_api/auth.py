@@ -39,6 +39,19 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_TOKEN_DIR = Path.home() / ".garmin-api" / "default"
 
+# Written by `garmin login` with a fresh id each time, and removed by `garmin
+# logout`. The library rewrites the token file whenever it refreshes, so the
+# file itself cannot tell a running server that someone logged in again,
+# perhaps as someone else; this can.
+LOGIN_MARKER = ".garmin-api-login"
+
+
+def _login_marker(directory: Path) -> str | None:
+    try:
+        return (directory / LOGIN_MARKER).read_text(encoding="utf-8").strip() or None
+    except OSError:
+        return None
+
 
 def token_dir() -> Path:
     """Where tokens live.
@@ -90,7 +103,10 @@ def token_age_days() -> float | None:
     files = _token_files()
     if not files:
         return None
-    newest = max(f.stat().st_mtime for f in files)
+    try:
+        newest = max(f.stat().st_mtime for f in files)
+    except FileNotFoundError:  # removed by a logout since it was found
+        return None
     return (datetime.now(UTC).timestamp() - newest) / 86400
 
 
@@ -135,7 +151,10 @@ def translate(exc: Exception) -> Exception:
         GarminConnectTooManyRequestsError,
     )
 
-    if isinstance(exc, GarminConnectTooManyRequestsError):
+    if isinstance(exc, GarminConnectTooManyRequestsError) or _status_of(exc) == 429:
+        # A 429 can also arrive wrapped as an authentication error, when it
+        # meets the profile fetch that loading tokens makes. Told to log in
+        # again, a user would walk into the SSO lockout this exists to avoid.
         return RateLimited(
             "Garmin is rate limiting this account.",
             detail=(
@@ -203,6 +222,10 @@ class Session:
         # source of truth: the same call has_tokens() makes.
         self._tokens_override = tokens
         self._client: Garmin | None = None
+        self._client_login: str | None = None
+        # The stored login Garmin last refused, so calls fail at once rather
+        # than each trying it again, until a new login replaces it.
+        self._refused: tuple[str | None, int] | None = None
         self._lock = threading.RLock()
 
     @property
@@ -220,20 +243,59 @@ class Session:
         an error the caller has to resolve with ``garmin login``.
         """
         with self._lock:
+            present = bool(_token_files(self._tokens))
             if self._client is not None:
-                return self._client
-            if not _token_files(self._tokens):
+                if present and _login_marker(self._tokens) == self._client_login:
+                    return self._client
+                # Logged out, or logged in again, perhaps as someone else.
+                self._discard()
+            if not present:
                 raise NotAuthenticated(
                     "No Garmin tokens found.",
                     detail=f"Run `garmin login` first. Tokens are stored in {self._tokens}.",
+                )
+            if self._refused is not None and self._refused == self._stored():
+                raise NotAuthenticated(
+                    "Garmin rejected the stored credentials.",
+                    detail="Run `garmin login` to authenticate again.",
                 )
             client = Garmin()
             try:
                 client.login(tokenstore=str(self._tokens))
             except Exception as exc:  # noqa: BLE001 -- re-raised as our own type
-                raise translate(exc) from exc
+                error = translate(exc)
+                if isinstance(error, NotAuthenticated):
+                    self._refused = self._stored()
+                raise error from exc
+            # The library loads the profile's timezone on first use, without a
+            # lock, and a caller racing that load gets the machine's timezone.
+            # Loaded here, under this lock, before anyone else can use it.
+            if client.get_user_timezone() is None and hasattr(client, "_time_zone_loaded"):
+                client._time_zone_loaded = False  # try again on next use
             self._client = client
+            self._client_login = _login_marker(self._tokens)
+            self._refused = None
             return client
+
+    def _stored(self) -> tuple[str | None, int]:
+        """What is on disk now: the login marker and the token file's mtime."""
+        files = _token_files(self._tokens)
+        try:
+            mtime = files[0].stat().st_mtime_ns if files else 0
+        except FileNotFoundError:
+            mtime = 0
+        return _login_marker(self._tokens), mtime
+
+    def _discard(self) -> None:
+        """Drop the cached client, and stop it writing its tokens back.
+
+        A call still running on it would otherwise save the old account's
+        refreshed tokens over a new login's.
+        """
+        inner = getattr(self._client, "client", None)
+        if inner is not None and hasattr(inner, "_tokenstore_path"):
+            inner._tokenstore_path = None
+        self._client = None
 
     def call(self, fn_name: str, *args: Any, **kwargs: Any) -> Any:
         """Run one Garmin call by method name, translating failures.
@@ -243,22 +305,33 @@ class Session:
         client, which is why the method is looked up by name each time. A
         second failure is reported rather than retried.
         """
+        client = self.client()
         try:
-            return getattr(self.client(), fn_name)(*args, **kwargs)
+            return getattr(client, fn_name)(*args, **kwargs)
         except Exception as exc:  # noqa: BLE001
-            if _is_unauthorized(exc):
-                with self._lock:
-                    self._client = None
-                logger.info("Garmin returned 401; reloading tokens and retrying once")
-                try:
-                    return getattr(self.client(), fn_name)(*args, **kwargs)
-                except Exception as retry_exc:  # noqa: BLE001
-                    raise translate(retry_exc) from retry_exc
-            raise translate(exc) from exc
+            if not _is_unauthorized(exc):
+                raise translate(exc) from exc
+            with self._lock:
+                # Only the client that failed is dropped: several calls failing
+                # at once must not each throw away the one another just built.
+                if self._client is client:
+                    self._discard()
+            logger.info("Garmin returned 401; reloading tokens and retrying once")
+            retry = self.client()
+            try:
+                return getattr(retry, fn_name)(*args, **kwargs)
+            except Exception as retry_exc:  # noqa: BLE001
+                if _is_unauthorized(retry_exc):
+                    with self._lock:
+                        if self._client is retry:
+                            self._discard()
+                        self._refused = self._stored()
+                raise translate(retry_exc) from retry_exc
 
     def reset(self) -> None:
         with self._lock:
-            self._client = None
+            self._discard()
+            self._refused = None
 
 
 def _is_unauthorized(exc: Exception) -> bool:
@@ -293,6 +366,17 @@ def client() -> Garmin:
     return session().client()
 
 
+def in_account_time(moment: datetime) -> datetime:
+    """``moment``, with the Garmin account's own timezone if it had no offset.
+
+    A model or a person saying "this morning at 7" means 7 where the account
+    is, and Garmin files the activity or weigh-in by that local time.
+    """
+    if moment.tzinfo is not None:
+        return moment
+    return moment.replace(tzinfo=call("_user_tzinfo"))
+
+
 def call(fn_name: str, *args: Any, **kwargs: Any) -> Any:
     """Call a python-garminconnect method by name, with error translation.
 
@@ -307,15 +391,24 @@ def interactive_login(email: str, password: str, prompt_mfa: Callable[[], str]) 
 
     Returns the display name so the caller can confirm whose account it is.
     """
+    import tempfile
+    import uuid
+
     target = token_dir()
     target.mkdir(parents=True, exist_ok=True)
     garmin = Garmin(email=email, password=password, prompt_mfa=prompt_mfa)
-    try:
-        # Passing the token store makes the library persist the tokens itself
-        # once the login succeeds, including through the MFA round trip.
-        garmin.login(tokenstore=str(target))
-        name = garmin.get_full_name() or email
-    except Exception as exc:  # noqa: BLE001
-        raise translate(exc) from exc
+    with tempfile.TemporaryDirectory() as fresh:
+        try:
+            # An empty store, so the password is used: given the real one, the
+            # library would resume the stored tokens and ignore it, keeping
+            # whichever account was logged in before.
+            garmin.login(tokenstore=fresh)
+            name = garmin.get_full_name() or email
+        except Exception as exc:  # noqa: BLE001
+            raise translate(exc) from exc
+        garmin.client.dump(str(target))
+    marker = target / LOGIN_MARKER
+    marker.write_text(uuid.uuid4().hex, encoding="utf-8")
+    marker.chmod(0o600)
     session().reset()
     return str(name)

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import threading
+from collections import defaultdict
 from datetime import date
 from typing import Any, Literal
 
@@ -225,7 +227,21 @@ def laps(activity_id: int | str) -> ActivityLaps:
     return build(int(activity_id), sport, splits, pool_length=pool_length, pool_unit=pool_unit)
 
 
+# Garmin replaces an activity's sets whole, so two edits running at once would
+# each write back the list they read, and the first one's change would vanish.
+_edit_locks: defaultdict[str, threading.Lock] = defaultdict(threading.Lock)
+_edit_locks_guard = threading.Lock()
+
+
 def edit_sets(activity_id: int | str, edit: SetEdit) -> ActivitySets:
+    """Correct an activity's sets; see :func:`_edit_sets`. One edit per activity at a time."""
+    with _edit_locks_guard:
+        lock = _edit_locks[str(activity_id)]
+    with lock:
+        return _edit_sets(activity_id, edit)
+
+
+def _edit_sets(activity_id: int | str, edit: SetEdit) -> ActivitySets:
     """Correct a strength activity's sets, and return them as Garmin now has them.
 
     Watches guess the exercise from wrist movement and often guess wrong.
@@ -283,10 +299,34 @@ def edit_sets(activity_id: int | str, edit: SetEdit) -> ActivitySets:
                 row["weight"] = round(change.weight_kg * 1000.0, 1)
 
     drop = {positions[n] for n in edit.delete}
-    kept = [row for position, row in enumerate(rows) if position not in drop]
+    kept = _without_stranded_rests(rows, drop)
     auth.call(
         "set_activity_exercise_sets",
         activity_id,
         {"activityId": int(activity_id), "exerciseSets": kept},
     )
     return get_sets(activity_id)
+
+
+def _is_rest(row: dict[str, Any]) -> bool:
+    return str(row.get("setType") or "").upper() == "REST"
+
+
+def _without_stranded_rests(rows: list[dict[str, Any]], drop: set[int]) -> list[dict[str, Any]]:
+    """The rows left after deleting ``drop``, without rests the deletion stranded.
+
+    Deleting a set leaves the rests on either side of it: two rests in a row,
+    or one at the end with no set after it. Only rests next to a deleted set
+    are touched; any others are as the watch recorded them.
+    """
+    near = {p + step for p in drop for step in (-1, 1)}
+    kept: list[tuple[int, dict[str, Any]]] = []
+    for position, row in enumerate(rows):
+        if position in drop:
+            continue
+        if _is_rest(row) and position in near and (not kept or _is_rest(kept[-1][1])):
+            continue  # a rest after a rest, or at the start
+        kept.append((position, row))
+    while kept and _is_rest(kept[-1][1]) and kept[-1][0] in near:
+        kept.pop()  # a rest with no set after it
+    return [row for _, row in kept]

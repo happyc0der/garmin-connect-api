@@ -74,10 +74,11 @@ def refusal(headers: Mapping[str, str], method: str, path: str) -> JSONResponse 
     if host_header and host not in LOCAL_HOSTS | _extra_hosts():
         return JSONResponse(status_code=403, content={"error": "Forbidden host"})
 
-    # Same host and port, with a scheme's default port filled in on both sides.
-    foreign = origin is not None and (
-        origin_at is None or origin_at != (host, host_port or origin_at[1])
-    )
+    # Same host and port. A Host without a port means the Origin scheme's
+    # default port, not whatever port the Origin names.
+    default = {"http": 80, "https": 443}.get(site.scheme) if site is not None else None
+    expected_port = host_port if host_port is not None else default
+    foreign = origin is not None and (origin_at is None or origin_at != (host, expected_port))
     if foreign and method.upper() not in SAFE_METHODS:
         return JSONResponse(status_code=403, content={"error": "Cross-origin write refused"})
 

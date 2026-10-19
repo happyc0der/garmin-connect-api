@@ -67,6 +67,9 @@ def trend(
     first = period_of(start_d, chosen) if native else start_d
     daily = [p for p in daily if first <= p.period <= end_d]
     points = sorted(daily, key=lambda p: p.period) if native else roll_up(daily, chosen)
+    # The change is between whole weeks or months: a range ending today cuts
+    # its last week short, and a stub of one day says little about a trend.
+    whole = [p for p in points if _whole(p.period, chosen, start_d, end_d)]
     return Trend(
         metric=metric,
         unit=UNITS[metric],
@@ -74,7 +77,7 @@ def trend(
         end=end_d,
         aggregation=chosen,
         points=points,
-        summary=summarise(points, daily),
+        summary=summarise(whole if len(whole) >= 2 else points, daily),
     )
 
 
@@ -85,6 +88,18 @@ def _day(value: Any) -> date | None:
         return date.fromisoformat(str(value)[:10])
     except ValueError:
         return None
+
+
+def _whole(period: date, aggregation: Aggregation, start: date, end: date) -> bool:
+    """Whether the range covers all of the week or month that starts on ``period``."""
+    if aggregation is Aggregation.day:
+        return True
+    if aggregation is Aggregation.week:
+        last = period + timedelta(days=6)
+    else:
+        following = (period.replace(day=28) + timedelta(days=4)).replace(day=1)
+        last = following - timedelta(days=1)
+    return start <= period and last <= end
 
 
 def _windows(start: date, end: date, days: int) -> list[tuple[str, str]]:

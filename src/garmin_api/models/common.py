@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import UTC, date, datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class ApiModel(BaseModel):
@@ -38,7 +38,9 @@ LATEST = datetime(2100, 1, 1, tzinfo=UTC)
 
 
 def within_fit_years(value: datetime) -> datetime:
-    if value.tzinfo is not None and not EARLIEST <= value < LATEST:
+    """``value`` if FIT can hold it; a local time without an offset is judged by its year."""
+    aware = value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+    if not EARLIEST <= aware < LATEST:
         raise ValueError("must fall between 1990 and 2099")
     return value
 
@@ -46,6 +48,33 @@ def within_fit_years(value: datetime) -> datetime:
 # The exercise search returns the variant as "exercise"; the write specs call
 # it "exercise_name". Either is accepted, so a search result can be passed on.
 EXERCISE_NAME_KEYS = ("exercise_name", "exercise")
+
+
+def _search_result_keys(schema: dict[str, Any]) -> None:
+    """Declare the search result's own keys, which strict clients check against."""
+    properties = schema.setdefault("properties", {})
+    properties.setdefault(
+        "exercise",
+        {"type": "string", "description": "The same as exercise_name: find_exercise's key."},
+    )
+    properties.setdefault(
+        "name",
+        {"type": "string", "description": "find_exercise's display name. Ignored."},
+    )
+
+
+class ExerciseSpec(WriteSpec):
+    """A write spec naming an exercise, which takes a find_exercise result as it is."""
+
+    model_config = ConfigDict(json_schema_extra=_search_result_keys)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _search_result(cls, data: Any) -> Any:
+        # The display name says nothing the category and exercise do not.
+        if isinstance(data, dict) and isinstance(data.get("name"), str):
+            data = {key: value for key, value in data.items() if key != "name"}
+        return data
 
 
 class Paging(BaseModel):

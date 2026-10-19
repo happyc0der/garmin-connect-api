@@ -85,7 +85,12 @@ def steps(
 
 @router.get("/training-readiness/{day}", operation_id="get_training_readiness")
 def training_readiness(day: date) -> Any:
-    """Garmin's readiness score and the factors behind it."""
+    """Garmin's readiness score and the factors behind it, every entry of the day.
+
+    Garmin recomputes it through the day. The entry with inputContext
+    AFTER_WAKEUP_RESET is the morning score, which the day summary and the
+    readiness trend use.
+    """
     return service.training_readiness(day)
 
 
@@ -130,7 +135,9 @@ def add_body_composition(spec: BodyCompositionSpec) -> dict[str, Any]:
 
     This is the way to bring a smart scale's full reading into Garmin. A plain
     add_weigh_in carries weight only. Garmin reports every upload as
-    "processed"; an identical measurement sent again is still kept only once.
+    "processed"; an identical measurement sent again is still kept only once,
+    but a different reading at the same moment is kept as a second weigh-in.
+    To correct one, delete the wrong one first: list_weigh_ins gives its id.
     """
     return weight_service.add_body_composition(spec)
 
@@ -164,7 +171,8 @@ def get_trend(
 
     The summary gives days_with_data (periods_with_data for VO2 max, which
     Garmin groups itself), the average, min and max of the days, the first and
-    last day, and change: the last period's average minus the first's.
+    last day, and change: the last whole period's average minus the first
+    whole period's, so a week the range cuts short does not count.
     """
     from ...services import trends
 

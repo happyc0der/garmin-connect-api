@@ -59,6 +59,11 @@ def measurement_serial(spec: BodyCompositionSpec) -> int:
 
 def encode_body_composition(spec: BodyCompositionSpec, *, serial: int | None = None) -> bytes:
     """A weigh-in as a FIT weight-scale file; a value FIT cannot hold is the request's fault."""
+    if spec.timestamp.tzinfo is None:
+        raise InvalidRequest(
+            "The timestamp needs a timezone offset to be written to a file.",
+            detail="Recording a weigh-in through the service fills in the account's.",
+        )
     try:
         return _encode(spec, serial)
     except FitEncodingError as exc:

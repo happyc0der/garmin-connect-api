@@ -15,6 +15,7 @@ from pydantic import AliasChoices, Field, computed_field, model_validator
 from .common import (
     EXERCISE_NAME_KEYS,
     ApiModel,
+    ExerciseSpec,
     WriteSpec,
     first,
     grams_to_kg,
@@ -216,7 +217,7 @@ class ActivitySets(ApiModel):
         return cls(activity_id=activity_id, sets=sets)
 
 
-class SetChange(WriteSpec):
+class SetChange(ExerciseSpec):
     """A change to one or more working sets, by their set_number.
 
     Give the exercise as Garmin's category and exercise_name pair; leave out

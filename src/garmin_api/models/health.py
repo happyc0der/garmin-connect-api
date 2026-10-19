@@ -396,7 +396,12 @@ class BodyCompositionSpec(WriteSpec):
     reach Garmin Connect. A plain weigh-in carries weight alone.
     """
 
-    timestamp: datetime = Field(description="When it was measured. Needs a timezone.")
+    timestamp: datetime = Field(
+        description=(
+            "When it was measured. Without an offset, it is taken as local time in the Garmin "
+            "account's own timezone."
+        )
+    )
     weight_kg: float = Field(gt=0, le=650)
     percent_fat: float | None = Field(default=None, ge=0, le=100)
     percent_hydration: float | None = Field(default=None, ge=0, le=100)
@@ -412,7 +417,6 @@ class BodyCompositionSpec(WriteSpec):
 
     @field_validator("timestamp")
     @classmethod
-    def _aware(cls, value: datetime) -> datetime:
-        if value.tzinfo is None:
-            raise ValueError("timestamp needs a timezone, or the weigh-in lands hours off")
+    def _in_range(cls, value: datetime) -> datetime:
+        # Placed in the account's timezone when recorded, if it has no offset.
         return within_fit_years(value)

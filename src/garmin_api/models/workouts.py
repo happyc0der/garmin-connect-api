@@ -21,6 +21,7 @@ from pydantic import AliasChoices, Discriminator, Field, Tag, field_validator, m
 from .common import (
     EXERCISE_NAME_KEYS,
     ApiModel,
+    ExerciseSpec,
     WriteSpec,
     first,
     parse_date,
@@ -83,7 +84,7 @@ class ScheduledWorkout(ApiModel):
         )
 
 
-class StrengthExerciseSpec(WriteSpec):
+class StrengthExerciseSpec(ExerciseSpec):
     """One exercise block in a planned workout: N sets of M reps."""
 
     category: str = Field(description='Garmin exercise category, e.g. "BENCH_PRESS".')
@@ -144,7 +145,7 @@ class StrengthSessionSet(WriteSpec):
     )
 
 
-class StrengthSessionExercise(WriteSpec):
+class StrengthSessionExercise(ExerciseSpec):
     category: str
     exercise_name: str = Field(
         default="",
@@ -179,7 +180,12 @@ class StrengthSessionSpec(WriteSpec):
     """
 
     name: str = Field(default="Strength Training", max_length=80)
-    start_time: datetime = Field(description="When the session started. Needs a timezone.")
+    start_time: datetime = Field(
+        description=(
+            "When the session started. Without an offset, it is taken as local time in the "
+            "Garmin account's own timezone."
+        )
+    )
     exercises: list[StrengthSessionExercise] = Field(min_length=1)
     notes: str | None = Field(
         default=None, max_length=1024, description="Saved as the activity's description."
@@ -187,11 +193,9 @@ class StrengthSessionSpec(WriteSpec):
 
     @field_validator("start_time")
     @classmethod
-    def _aware(cls, value: datetime) -> datetime:
-        # Without an offset the encoder could only guess UTC, and a 7am
-        # session in New York would land in Garmin at 3am.
-        if value.tzinfo is None:
-            raise ValueError("start_time needs a timezone offset, e.g. 2026-09-21T07:00:00-04:00")
+    def _in_range(cls, value: datetime) -> datetime:
+        # A time without an offset is placed in the account's timezone when
+        # the session is logged; encoding one offline needs the offset given.
         return within_fit_years(value)
 
     @property

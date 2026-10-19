@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -202,7 +203,10 @@ class TestDayParts:
         fake_garmin["responses"].update(self.STUBS)
         fake_garmin["responses"]["connectapi"] = []
         asyncio.run(create_mcp().call_tool("week_summary", {"end_day": "2026-10-18"}))
-        assert len(fake_garmin["calls"]) <= 7 * 3 + 1
+        # The account's timezone comes from the client's cache, loaded once when
+        # it connects, so it is not a request to Garmin.
+        requests = [c for c in fake_garmin["calls"] if c[0] != "_user_tzinfo"]
+        assert len(requests) <= 7 * 3 + 1
 
 
 class TestBodyCompositionFit:
@@ -246,9 +250,34 @@ class TestBodyCompositionFit:
     def test_the_same_weigh_in_encodes_identically(self) -> None:
         assert encode_body_composition(self.SPEC) == encode_body_composition(self.SPEC)
 
-    def test_a_naive_timestamp_is_refused(self) -> None:
-        with pytest.raises(ValueError, match="timezone"):
+    def test_a_naive_timestamp_cannot_be_written_offline(self) -> None:
+        """Without an account to ask, a time with no offset has no zone to land in."""
+        from garmin_api.fit.body import encode_body_composition
+
+        spec = BodyCompositionSpec(timestamp=datetime(2026, 10, 19, 7, 30), weight_kg=72.4)
+        with pytest.raises(InvalidRequest, match="timezone"):
+            encode_body_composition(spec)
+
+    def test_a_naive_timestamp_is_recorded_in_the_accounts_zone(
+        self, fake_garmin: dict[str, Any]
+    ) -> None:
+        from zoneinfo import ZoneInfo
+
+        from garmin_api.fit.body import decode_body_composition as decode
+
+        sent: list[bytes] = []
+
+        def upload(path: str) -> Any:
+            sent.append(Path(path).read_bytes())
+            return {"detailedImportResult": {"successes": [{}], "failures": []}}
+
+        fake_garmin["responses"].update(
+            {"_user_tzinfo": ZoneInfo("America/New_York"), "upload_activity": upload}
+        )
+        weight.add_body_composition(
             BodyCompositionSpec(timestamp=datetime(2026, 10, 19, 7, 30), weight_kg=72.4)
+        )
+        assert decode(sent[0])[0].timestamp == datetime(2026, 10, 19, 11, 30, tzinfo=UTC)
 
     def test_a_file_with_no_weigh_ins_says_so(self, non_strength_fit: bytes) -> None:
         with pytest.raises(InvalidRequest, match="No weigh-ins"):
