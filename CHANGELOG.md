@@ -1,5 +1,47 @@
 # Changelog
 
+## 0.2.1 (2026-10-19)
+
+Fixes from a review of the whole package after 0.2.0, each reproduced before it was fixed and
+covered by a test that fails on 0.2.0.
+
+### Fixed
+
+- **Pushing a workout to a watch** with no device named sent it to Garmin's "last used device",
+  which can be a "Default" pseudo-device left by an uploaded file or a smart scale, never a watch.
+  A push now goes only to a device on the account's list: the last used if listed, else the
+  primary activity tracker, else the only device. The reply names the device.
+- **Logging a session.** A re-upload answered with Garmin's 409 is reported as a duplicate, with
+  the existing activity's id. After an "accepted" upload, an activity that was already at the
+  session's start, such as the watch's own recording, is never taken for the new one and renamed.
+  A failed lookup no longer hides a successful upload. An exercise given by category alone is the
+  category's generic entry, in sessions and planned workouts alike.
+- **FIT files.** Fields a watch leaves empty, such as the weight of a bodyweight set, read as
+  missing instead of 4,095.94 kg. The session's own start time is used. Rests across a
+  daylight-saving change last as long as they say. Timed sets carry no reps. A renamed session
+  keeps its serial, so Garmin still sees it as a duplicate.
+- **Health data.** Sleep SpO2 and respiration were always empty and now come through. The day
+  summary's training readiness is the morning score, as the trend's is. Steps are unknown rather
+  than zero when Garmin does not answer. Personal records are no longer left unnamed by one failed
+  request. A weigh-in given in another timezone's time lands on the account's own local day.
+- **Errors.** A read that gets a 401 reloads the stored tokens and retries once, so a running
+  server recovers after `garmin login`. A network failure on a write is "Garmin unavailable", not a
+  crash. Unexpected replies are a clear 502 rather than a 500, which over MCP read as the model's
+  own invalid input. Error text keeps its advice, such as "Run `garmin login`".
+- **Workouts.** Target ranges are accepted either way round; an impossible pace is refused up
+  front instead of crashing the build. A workout created but not scheduled says its id, so a retry
+  does not make a second copy.
+- **Security.** Writes are refused from web pages served by any other local server, not just other
+  hosts. `garmin mcp --http` now has the HTTP API's guard: host and origin checks, the bearer key
+  when `GARMIN_API_KEY` is set, and no binding beyond localhost without one.
+- **Exercise names.** `match_exercise` no longer turns one lift into another ("Hack Squat" became
+  "Back Squats"). Search understands plurals such as "bench presses", "crunches" and "lat
+  pulldowns", and nicknames inside a name, such as "dumbbell rdl".
+- **Command line.** Spec files saved with a byte-order mark, or as UTF-16 by Windows PowerShell,
+  are read correctly. `--out` may be a directory. A rejected upload exits 1.
+- `edit_activity_sets` is no longer advertised as idempotent; `get_activity_sets` includes the
+  total volume; `end_date` without `start_date` is refused instead of ignored.
+
 ## 0.2.0 (2026-10-19)
 
 First public release. 0.1.0 was prepared but never published; its contents are listed below

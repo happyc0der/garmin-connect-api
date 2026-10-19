@@ -1,6 +1,6 @@
 [project]
 name = "garmin-connect-api"
-version = "0.2.0"
+version = "0.2.1"
 description = "Read and write Garmin Connect from Python, HTTP or an MCP client: activities, strength sets, health data, workouts, weigh-ins"
 readme = "README.md"
 license = "MIT"
@@ -33,6 +33,8 @@ dependencies = [
     "fastmcp>=4.0,<5",
     "fit-tool>=0.9.13,<1",
     "typer>=0.15",
+    # The upload routes take multipart forms; FastAPI needs this to parse them.
+    "python-multipart>=0.0.20",
 ]
 
 [project.urls]

@@ -659,7 +659,7 @@ wheels = [
 
 [[package]]
 name = "garmin-connect-api"
-version = "0.2.0"
+version = "0.2.1"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi" },
@@ -667,6 +667,7 @@ dependencies = [
     { name = "fit-tool" },
     { name = "garminconnect" },
     { name = "pydantic" },
+    { name = "python-multipart" },
     { name = "typer" },
     { name = "uvicorn" },
 ]
@@ -688,6 +689,7 @@ requires-dist = [
     { name = "fit-tool", specifier = ">=0.9.13,<1" },
     { name = "garminconnect", specifier = ">=0.3.19,<0.4" },
     { name = "pydantic", specifier = ">=2.9,<3" },
+    { name = "python-multipart", specifier = ">=0.0.20" },
     { name = "typer", specifier = ">=0.15" },
     { name = "uvicorn", specifier = ">=0.32" },
 ]
