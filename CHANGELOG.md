@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.2.5 (2026-10-19)
+
+A fifth review round: a cold read of the whole package by a reviewer new to it, and 0.2.4's own
+changes checked for regressions. Each finding was reproduced before it was fixed, and each fix has
+a test that fails without it. The findings now take unusual conditions to show, but two gave
+wrong answers to ordinary questions.
+
+### Fixed
+
+- **Laps.** A lap's pace was worked out on elapsed time and the summary's on moving time, so a lap
+  with a stop in it read slower in the list than in the summary, and could be named the fastest
+  while showing the slowest pace. The first and second halves split the laps by count, so a 9 km
+  lap and a 1 km lap made a "second half" of 1 km. Laps are on moving time now, and the halves
+  split the distance.
+- **The body fat trend** dropped any day whose last weigh-in carried weight only, though an
+  earlier reading that day had body fat.
+- **Weigh-ins and timezones.** `add_weigh_in` placed a time with no offset, or no time at all, in
+  the machine's timezone through the library; it now uses the account's, and refuses when that is
+  unknown. A time given with its offset is sent as given when the account's timezone cannot be
+  read, rather than refused. `tzdata` is now a dependency, so systems without their own timezone
+  database can load the account's.
+- **Data Garmin withholds as private** read as an empty day; it is now reported as withheld, and
+  a day summary lists any part it could not read, and why.
+- **Behind a proxy that ends TLS**, the service's own /docs page could no longer write.
+- **Uploads.** A reply that could not be read was a success over HTTP and MCP but a failure in the
+  CLI; it is an error everywhere. A failed connect is no longer repeated by every part of a day
+  summary, and a rate-limit note is no longer replaced by advice to make another call.
+- Resting heart rate trends are fetched a year at a time, as the library advises.
+
 ## 0.2.4 (2026-10-19)
 
 A fourth review round: 0.2.3's own changes checked for regressions, and a security and
