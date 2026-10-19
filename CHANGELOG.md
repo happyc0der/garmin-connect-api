@@ -10,7 +10,8 @@ covered by a test that fails on 0.2.0.
 - **Pushing a workout to a watch** with no device named sent it to Garmin's "last used device",
   which can be a "Default" pseudo-device left by an uploaded file or a smart scale, never a watch.
   A push now goes only to a device on the account's list: the last used if listed, else the
-  primary activity tracker, else the only device. The reply names the device.
+  primary activity tracker, else the only device. The reply names the device. Checked live:
+  Garmin queued the workout for the watch.
 - **Logging a session.** A re-upload answered with Garmin's 409 is reported as a duplicate, with
   the existing activity's id. After an "accepted" upload, an activity that was already at the
   session's start, such as the watch's own recording, is never taken for the new one and renamed.

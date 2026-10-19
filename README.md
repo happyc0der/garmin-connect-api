@@ -17,8 +17,7 @@ strength sessions, and weigh-ins with full body composition.
 v0.2. Reads activities with per-set strength detail, laps and pool-swim lengths, daily health,
 trends over up to two years and named personal records; writes strength, run, ride and swim
 workouts, completed strength sessions, set corrections and weigh-ins with body composition. 41
-tools, each checked against a real account except pushing a workout to a watch, which is tested
-offline only. Bug reports and feature requests go to
+tools, every one checked against a real account. Bug reports and feature requests go to
 [GitHub Issues](https://github.com/happyc0der/garmin-connect-api/issues).
 
 ## Quick start
