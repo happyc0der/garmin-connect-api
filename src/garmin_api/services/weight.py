@@ -7,7 +7,7 @@ from typing import Any
 
 from .. import auth
 from ..models.common import as_date_str
-from ..models.health import WeighIn
+from ..models.health import BodyCompositionSpec, WeighIn
 
 
 def weigh_ins(
@@ -40,3 +40,25 @@ def add_weigh_in(
 
 def delete_weigh_in(weight_pk: str, day: date | str) -> Any:
     return auth.call("delete_weigh_in", weight_pk, as_date_str(day))
+
+
+def add_body_composition(spec: BodyCompositionSpec) -> dict[str, Any]:
+    """Record a weigh-in with body composition: fat, water, muscle, bone and more.
+
+    Uploaded as a FIT weight-scale file, the same way Garmin's own scales send
+    theirs. The file's serial comes from the measurement, so recording the same
+    weigh-in twice is reported as a duplicate rather than stored twice.
+    """
+    import tempfile
+    from pathlib import Path
+
+    from ..fit.body import encode_body_composition
+    from .uploads import upload_file
+
+    with tempfile.TemporaryDirectory() as tmp:
+        target = Path(tmp) / "body_composition.fit"
+        target.write_bytes(encode_body_composition(spec))
+        result = upload_file(target)
+    result["timestamp"] = spec.timestamp.isoformat()
+    result["weight_kg"] = spec.weight_kg
+    return result

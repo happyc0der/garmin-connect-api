@@ -96,3 +96,38 @@ def test_log_a_strength_session_and_delete_it() -> None:
         assert found.total_volume_kg == pytest.approx(10 * 60 + 8 * 65, abs=1)
     finally:
         activities.delete(activity_id)
+
+
+def test_record_and_delete_a_body_composition_weigh_in() -> None:
+    """Dated 2020 so a test weigh-in never sits in a recent weight trend."""
+    from datetime import timezone
+
+    from garmin_api.models.health import BodyCompositionSpec
+    from garmin_api.services import weight
+
+    moment = datetime(2020, 1, 1, 12, 0, tzinfo=timezone(timedelta(hours=-5)))
+    spec = BodyCompositionSpec(
+        timestamp=moment,
+        weight_kg=72.4,
+        percent_fat=18.4,
+        percent_hydration=55.2,
+        muscle_mass_kg=34.25,
+        bone_mass_kg=3.1,
+        metabolic_age=24,
+    )
+    result = weight.add_body_composition(spec)
+    assert result["status"] in {"created", "duplicate", "unknown"}, result
+
+    found = [w for w in weight.day_weigh_ins(moment.date()) if w.weight_kg == 72.4]
+    try:
+        assert found, "the weigh-in should be readable straight back"
+        entry = found[0]
+        assert entry.body_fat_pct == pytest.approx(18.4, abs=0.1)
+        assert entry.muscle_mass_kg == pytest.approx(34.25, abs=0.05)
+        assert entry.metabolic_age == 24
+    finally:
+        for w in found:
+            if w.sample_pk:
+                weight.delete_weigh_in(str(w.sample_pk), moment.date())
+
+    assert not [w for w in weight.day_weigh_ins(moment.date()) if w.weight_kg == 72.4]

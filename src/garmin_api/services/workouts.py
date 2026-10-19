@@ -15,6 +15,8 @@ from datetime import date
 from typing import Any
 
 from garminconnect.workout import (
+    ExecutableStep,
+    RepeatGroup,
     StrengthWorkout,
     WorkoutSegment,
     create_strength_set,
@@ -23,6 +25,7 @@ from garminconnect.workout import (
 from .. import auth, catalogue
 from ..errors import NotFound
 from ..models.common import as_date_str
+from ..models.health import DeviceSummary
 from ..models.workouts import ScheduledWorkout, StrengthWorkoutSpec, WorkoutSummary
 
 SPORT_STRENGTH = {
@@ -53,7 +56,7 @@ def build_strength(spec: StrengthWorkoutSpec) -> dict[str, Any]:
     is the shape the Connect editor produces and the watch knows how to follow.
     Step orders must be unique across the whole segment, hence the counter.
     """
-    steps = []
+    steps: list[ExecutableStep | RepeatGroup] = []
     order = 1
     estimated = 0
     for exercise in spec.exercises:
@@ -157,5 +160,6 @@ def push_to_device(workout_id: int | str, device_id: int | str | None = None) ->
     return auth.call("push_workout_to_device", workout_id, device_id)
 
 
-def devices() -> Any:
-    return auth.call("get_devices")
+def devices() -> list[DeviceSummary]:
+    """Devices on the account. Garmin's own entry is ~300 capability flags each."""
+    return [DeviceSummary.from_garmin(d) for d in (auth.call("get_devices") or [])]

@@ -23,7 +23,8 @@ composition. Original activity files in FIT, TCX, GPX or CSV.
 
 **Write.** Strength workouts onto the Garmin calendar, scheduled and pushed to a watch.
 Completed strength sessions into the activity history, with every set intact. Activity renames,
-type changes and deletions. Weigh-ins.
+type changes and deletions. Weigh-ins, including full body composition from a smart scale: fat,
+water, muscle, bone, BMI and metabolic age, written the way Garmin's own Index scales write them.
 
 Logging a completed session is the part Garmin's own developer programme has never offered.
 Their Training API publishes plans; nothing in it uploads a finished workout. This encodes the
@@ -95,7 +96,7 @@ garmin serve
 ```
 
 Binds to `127.0.0.1:8765`, with interactive docs at `/docs` and the schema at `/openapi.json`.
-37 operations across activities, health, workouts, sessions and the exercise catalogue.
+39 operations across activities, health, workouts, sessions and the exercise catalogue.
 
 Binding anywhere other than localhost requires `GARMIN_API_KEY` to be set, and the service
 refuses to start without it. The service can write to your Garmin account, so it should not be
@@ -133,6 +134,8 @@ description. Four are hand-written because a model wants a different shape from 
 Bulky endpoints are deliberately excluded from the tool list, and remain on the HTTP API: raw
 file downloads and sample-level activity detail are hundreds of kilobytes of numbers that would
 flood a context window.
+The health tools answer with summaries by default, such as minutes in each stress band rather than
+480 three-minute readings, and take a flag when the raw readings are wanted.
 
 ## Naming exercises
 
@@ -169,7 +172,7 @@ status of `duplicate` rather than as a second activity.
 uv run pytest
 ```
 
-84 tests, no network and no account needed. They cover the models against real Garmin payload
+112 tests, no network and no account needed. They cover the models against real Garmin payload
 shapes, the FIT codec's round trip, the whole 1,527-entry exercise catalogue against the FIT
 profile, the HTTP routes, the generated MCP tool list, and every tool's output against its own
 advertised schema, which strict MCP clients enforce.

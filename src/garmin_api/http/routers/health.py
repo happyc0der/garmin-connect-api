@@ -7,7 +7,16 @@ from typing import Any
 
 from fastapi import APIRouter, Query
 
-from ...models.health import DaySummary, SleepSummary, WeighIn
+from ...models.health import (
+    BodyCompositionSpec,
+    DaySummary,
+    HrvSummary,
+    PersonalRecord,
+    SleepSummary,
+    StepsSummary,
+    StressSummary,
+    WeighIn,
+)
 from ...services import health as service
 from ...services import weight as weight_service
 
@@ -31,16 +40,22 @@ def sleep(day: date) -> SleepSummary | None:
     return service.sleep(day)
 
 
-@router.get("/hrv/{day}", operation_id="get_hrv")
-def hrv(day: date) -> Any:
-    """Heart rate variability for one night."""
-    return service.hrv(day)
+@router.get("/hrv/{day}", operation_id="get_hrv", response_model=HrvSummary | None)
+def hrv(
+    day: date,
+    include_readings: bool = Query(False, description="Add the five-minute readings."),
+) -> HrvSummary | None:
+    """Heart rate variability for one night: average, status and baseline."""
+    return service.hrv_summary(day, include_readings=include_readings)
 
 
-@router.get("/stress/{day}", operation_id="get_stress")
-def stress(day: date) -> Any:
-    """All-day stress levels."""
-    return service.stress(day)
+@router.get("/stress/{day}", operation_id="get_stress", response_model=StressSummary | None)
+def stress(
+    day: date,
+    include_samples: bool = Query(False, description="Add the three-minute readings."),
+) -> StressSummary | None:
+    """A day of stress: average, peak, and minutes in each of Garmin's bands."""
+    return service.stress_summary(day, include_samples=include_samples)
 
 
 @router.get("/body-battery", operation_id="get_body_battery")
@@ -52,10 +67,13 @@ def body_battery(
     return service.body_battery(start, end)
 
 
-@router.get("/steps/{day}", operation_id="get_steps")
-def steps(day: date) -> Any:
-    """Step counts through one day."""
-    return service.steps(day)
+@router.get("/steps/{day}", operation_id="get_steps", response_model=StepsSummary)
+def steps(
+    day: date,
+    include_buckets: bool = Query(False, description="Add Garmin's quarter-hour buckets."),
+) -> StepsSummary:
+    """A day of steps: the total, and an hour-by-hour profile in GMT."""
+    return service.steps_summary(day, include_buckets=include_buckets)
 
 
 @router.get("/training-readiness/{day}", operation_id="get_training_readiness")
@@ -70,10 +88,10 @@ def training_status(day: date) -> Any:
     return service.training_status(day)
 
 
-@router.get("/records", operation_id="get_personal_records")
-def personal_records() -> Any:
-    """Garmin's personal records."""
-    return service.personal_records()
+@router.get("/records", operation_id="get_personal_records", response_model=list[PersonalRecord])
+def personal_records() -> list[PersonalRecord]:
+    """Garmin's personal records, one entry each."""
+    return service.records()
 
 
 @router.get("/weight", operation_id="list_weigh_ins", response_model=list[WeighIn])
@@ -94,3 +112,23 @@ def add_weigh_in(
     """Record a body weight."""
     weight_service.add_weigh_in(weight, unit=unit, timestamp=timestamp)
     return {"status": "recorded", "weight": weight, "unit": unit}
+
+
+@router.post("/body-composition", operation_id="add_body_composition")
+def add_body_composition(spec: BodyCompositionSpec) -> dict[str, Any]:
+    """Record a weigh-in with body composition: fat, water, muscle, bone, BMI.
+
+    This is the way to bring a smart scale's full reading into Garmin. A plain
+    add_weigh_in carries weight only. Recording the same measurement twice is
+    reported as a duplicate.
+    """
+    return weight_service.add_body_composition(spec)
+
+
+@router.delete("/weight/{sample_pk}", operation_id="delete_weigh_in")
+def delete_weigh_in(
+    sample_pk: int, day: date = Query(description="The weigh-in's calendar date.")
+) -> dict[str, Any]:
+    """Delete one weigh-in. Takes the sample_pk that list_weigh_ins returns."""
+    weight_service.delete_weigh_in(str(sample_pk), day)
+    return {"sample_pk": sample_pk, "status": "deleted"}

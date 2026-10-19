@@ -160,7 +160,8 @@ def _add_convenience_tools(mcp: FastMCP) -> None:
         days = []
         for offset in range(7):
             current = first + timedelta(days=offset)
-            summary = health_service.day(current)
+            # Only the parts this answer uses: three requests a day, not five.
+            summary = health_service.day(current, parts={"stats", "sleep", "readiness"})
             days.append(
                 {
                     "day": current.isoformat(),

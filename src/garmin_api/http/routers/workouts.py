@@ -7,6 +7,7 @@ from typing import Any
 
 from fastapi import APIRouter, Body, Query
 
+from ...models.health import DeviceSummary
 from ...models.workouts import ScheduledWorkout, StrengthWorkoutSpec, WorkoutSummary
 from ...services import workouts as service
 
@@ -97,7 +98,7 @@ def delete(workout_id: int) -> dict[str, Any]:
     return {"workout_id": workout_id, "status": "deleted"}
 
 
-@router.get("/devices/list", operation_id="list_devices")
-def devices() -> Any:
+@router.get("/devices/list", operation_id="list_devices", response_model=list[DeviceSummary])
+def devices() -> list[DeviceSummary]:
     """Garmin devices on the account, with the ids push_workout_to_device takes."""
     return service.devices()

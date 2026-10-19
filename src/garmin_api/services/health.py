@@ -15,7 +15,15 @@ from typing import Any
 from .. import auth
 from ..errors import NotAuthenticated, RateLimited
 from ..models.common import as_date_str
-from ..models.health import DaySummary, SleepSummary, WeighIn
+from ..models.health import (
+    DaySummary,
+    HrvSummary,
+    PersonalRecord,
+    SleepSummary,
+    StepsSummary,
+    StressSummary,
+    WeighIn,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -90,35 +98,75 @@ def personal_records() -> Any:
     return _safe("get_personal_record")
 
 
-def day(target: date | str, *, include_raw: bool = False) -> DaySummary:
+DAY_PARTS = frozenset({"stats", "sleep", "hrv", "readiness", "weight"})
+
+
+def day(
+    target: date | str,
+    *,
+    include_raw: bool = False,
+    parts: frozenset[str] | set[str] = DAY_PARTS,
+) -> DaySummary:
     """One day, assembled: activity, heart, stress, sleep, HRV, readiness.
 
     Several endpoints in one answer, because that is the question people
     actually ask. Each part is fetched tolerantly, so a metric the watch does
     not record leaves a null instead of failing the call.
+
+    Each part is one Garmin request. ``parts`` limits which are fetched, which
+    matters when assembling many days: a week of full days is 35 requests.
     """
+    unknown = set(parts) - DAY_PARTS
+    if unknown:
+        raise ValueError(f"Unknown day parts: {sorted(unknown)}")
+
     day_str = as_date_str(target)
-    base = _safe("get_stats", day_str) or {}
     parsed_day = date.fromisoformat(day_str)
+    base = (_safe("get_stats", day_str) or {}) if "stats" in parts else {}
     summary = DaySummary.from_stats(parsed_day, base, include_raw=include_raw)
 
-    summary.sleep = sleep(day_str, include_raw=include_raw)
+    if "sleep" in parts:
+        summary.sleep = sleep(day_str, include_raw=include_raw)
 
-    hrv_payload = hrv(day_str) or {}
-    hrv_summary = hrv_payload.get("hrvSummary") if isinstance(hrv_payload, dict) else None
-    if isinstance(hrv_summary, dict):
-        summary.hrv_last_night_avg = hrv_summary.get("lastNightAvg")
-        summary.hrv_status = hrv_summary.get("status")
+    if "hrv" in parts:
+        hrv_payload = hrv(day_str) or {}
+        hrv_part = hrv_payload.get("hrvSummary") if isinstance(hrv_payload, dict) else None
+        if isinstance(hrv_part, dict):
+            summary.hrv_last_night_avg = hrv_part.get("lastNightAvg")
+            summary.hrv_status = hrv_part.get("status")
 
-    readiness = training_readiness(day_str)
-    if isinstance(readiness, list) and readiness:
-        first_entry = readiness[0]
-        if isinstance(first_entry, dict):
-            summary.training_readiness = first_entry.get("score")
+    if "readiness" in parts:
+        readiness = training_readiness(day_str)
+        if isinstance(readiness, list) and readiness:
+            first_entry = readiness[0]
+            if isinstance(first_entry, dict):
+                summary.training_readiness = first_entry.get("score")
 
-    weigh_ins = _safe("get_daily_weigh_ins", day_str) or {}
-    rows = weigh_ins.get("dateWeightList") if isinstance(weigh_ins, dict) else None
-    if rows:
-        summary.weight = WeighIn.from_garmin(rows[0], include_raw=include_raw)
+    if "weight" in parts:
+        weigh_ins = _safe("get_daily_weigh_ins", day_str) or {}
+        rows = weigh_ins.get("dateWeightList") if isinstance(weigh_ins, dict) else None
+        if rows:
+            summary.weight = WeighIn.from_garmin(rows[0], include_raw=include_raw)
 
     return summary
+
+
+def hrv_summary(day: date | str, *, include_readings: bool = False) -> HrvSummary | None:
+    payload = hrv(day)
+    return HrvSummary.from_garmin(payload, include_readings=include_readings) if payload else None
+
+
+def stress_summary(day: date | str, *, include_samples: bool = False) -> StressSummary | None:
+    payload = stress(day)
+    return StressSummary.from_garmin(payload, include_samples=include_samples) if payload else None
+
+
+def steps_summary(day: date | str, *, include_buckets: bool = False) -> StepsSummary:
+    day_str = as_date_str(day)
+    return StepsSummary.from_garmin(
+        date.fromisoformat(day_str), steps(day_str) or [], include_buckets=include_buckets
+    )
+
+
+def records() -> list[PersonalRecord]:
+    return [PersonalRecord.from_garmin(r) for r in (personal_records() or [])]

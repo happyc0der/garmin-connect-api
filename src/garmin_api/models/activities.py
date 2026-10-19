@@ -65,6 +65,8 @@ class ActivitySummary(ApiModel):
 
     @classmethod
     def from_garmin(cls, payload: dict[str, Any], *, include_raw: bool = False) -> Self:
+        original = payload
+        payload = _flatten_detail(payload)
         return cls(
             activity_id=int(first(payload, "activityId", "activityid") or 0),
             name=first(payload, "activityName", "activity_name"),
@@ -82,8 +84,24 @@ class ActivitySummary(ApiModel):
             # Only strength activities carry sets. Swims have laps and stroke
             # counts, which are a different thing and must not read as sets.
             has_sets=(payload.get("activityType") or {}).get("typeKey") in STRENGTH_TYPES,
-            raw=payload if include_raw else None,
+            raw=original if include_raw else None,
         )
+
+
+def _flatten_detail(payload: dict[str, Any]) -> dict[str, Any]:
+    """Give the single-activity response the list entry's flat shape.
+
+    The list endpoint puts every field at the top level. Fetching one activity
+    nests the same fields under ``summaryDTO`` and renames ``activityType`` to
+    ``activityTypeDTO``, so without this a fetched activity came back with no
+    type and no start time.
+    """
+    summary = payload.get("summaryDTO")
+    if not isinstance(summary, dict):
+        return payload
+    flat = {**summary, **{k: v for k, v in payload.items() if k != "summaryDTO"}}
+    flat.setdefault("activityType", payload.get("activityTypeDTO"))
+    return flat
 
 
 class Activity(ActivitySummary):

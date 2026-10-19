@@ -11,7 +11,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Any
 
-from pydantic import Field
+from pydantic import Field, field_validator
 
 from .common import ApiModel, first, parse_date, parse_dt
 
@@ -51,7 +51,27 @@ class SleepSummary(ApiModel):
         )
 
 
+# Garmin hands metabolic age back as a duration in milliseconds: 24 years
+# arrives as 757366224000. Captured live by writing ages 24, 30 and 50 and
+# reading them back, which divided out to exactly 24.0, 30.0 and 50.0.
+MS_PER_YEAR = 365.2425 * 86_400_000
+
+
+def _metabolic_age_years(value: Any) -> int | None:
+    if value is None:
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    # A plain count of years is left alone, in case Garmin ever sends one.
+    return round(number / MS_PER_YEAR) if number > 1000 else round(number)
+
+
 class WeighIn(ApiModel):
+    sample_pk: int | None = Field(
+        default=None, description="Garmin's id for this weigh-in, which delete takes."
+    )
     day: date | None = None
     timestamp: datetime | None = None
     weight_kg: float | None = None
@@ -60,6 +80,9 @@ class WeighIn(ApiModel):
     body_water_pct: float | None = None
     muscle_mass_kg: float | None = None
     bone_mass_kg: float | None = None
+    visceral_fat_rating: int | None = None
+    metabolic_age: int | None = None
+    physique_rating: int | None = None
     source: str | None = None
     raw: dict[str, Any] | None = None
 
@@ -74,6 +97,7 @@ class WeighIn(ApiModel):
                 return None
 
         return cls(
+            sample_pk=payload.get("samplePk"),
             day=parse_date(first(payload, "calendarDate", "date")),
             timestamp=parse_dt(first(payload, "timestampGMT", "date")),
             weight_kg=g_to_kg(first(payload, "weight")),
@@ -82,6 +106,9 @@ class WeighIn(ApiModel):
             body_water_pct=first(payload, "bodyWater"),
             muscle_mass_kg=g_to_kg(first(payload, "muscleMass")),
             bone_mass_kg=g_to_kg(first(payload, "boneMass")),
+            visceral_fat_rating=first(payload, "visceralFat"),
+            metabolic_age=_metabolic_age_years(first(payload, "metabolicAge")),
+            physique_rating=first(payload, "physiqueRating"),
             source=first(payload, "sourceType"),
             raw=payload if include_raw else None,
         )
@@ -147,3 +174,210 @@ class DaySummary(ApiModel):
             body_battery_low=first(stats, "bodyBatteryLowestValue"),
             raw=stats if include_raw else None,
         )
+
+
+class HrvSummary(ApiModel):
+    """One night's heart rate variability, without the five-minute readings."""
+
+    day: date | None = None
+    last_night_avg: int | None = None
+    last_night_5min_high: int | None = None
+    weekly_avg: int | None = None
+    status: str | None = Field(default=None, description='e.g. "BALANCED", "LOW", "UNBALANCED".')
+    baseline_low_upper: int | None = None
+    baseline_balanced_low: int | None = None
+    baseline_balanced_upper: int | None = None
+    readings: list[dict[str, Any]] | None = Field(
+        default=None, description="The five-minute readings, only when asked for."
+    )
+
+    @classmethod
+    def from_garmin(cls, payload: dict[str, Any], *, include_readings: bool = False) -> HrvSummary:
+        summary = payload.get("hrvSummary") or {}
+        baseline = summary.get("baseline") or {}
+        return cls(
+            day=parse_date(summary.get("calendarDate")),
+            last_night_avg=summary.get("lastNightAvg"),
+            last_night_5min_high=summary.get("lastNight5MinHigh"),
+            weekly_avg=summary.get("weeklyAvg"),
+            status=summary.get("status"),
+            baseline_low_upper=baseline.get("lowUpper"),
+            baseline_balanced_low=baseline.get("balancedLow"),
+            baseline_balanced_upper=baseline.get("balancedUpper"),
+            readings=(payload.get("hrvReadings") or []) if include_readings else None,
+        )
+
+
+# Garmin's published stress bands. A reading of -1 or -2 is Garmin's code for
+# "no reading": the watch was off the wrist, or there was too much movement.
+STRESS_BANDS = (("rest", 0, 25), ("low", 26, 50), ("medium", 51, 75), ("high", 76, 100))
+
+
+class StressSummary(ApiModel):
+    """A day of stress, as minutes in each of Garmin's bands.
+
+    Garmin samples every three minutes, so a day is 480 readings. Those are
+    reduced to what the Garmin app itself shows: an average, a peak, and how
+    long was spent resting, low, medium and high.
+    """
+
+    day: date | None = None
+    average: int | None = None
+    max: int | None = None
+    rest_minutes: int = 0
+    low_minutes: int = 0
+    medium_minutes: int = 0
+    high_minutes: int = 0
+    unmeasured_minutes: int = Field(
+        default=0, description="Off the wrist, or too much movement to read."
+    )
+    samples: list[list[Any]] | None = Field(
+        default=None, description="[timestamp_ms, level] pairs, only when asked for."
+    )
+
+    @classmethod
+    def from_garmin(
+        cls, payload: dict[str, Any], *, include_samples: bool = False
+    ) -> StressSummary:
+        values = [v for v in (payload.get("stressValuesArray") or []) if isinstance(v, list)]
+        times = [v[0] for v in values]
+        gaps = [b - a for a, b in zip(times, times[1:], strict=False) if b > a]
+        interval_min = (min(gaps) / 60000) if gaps else 3.0
+
+        minutes = {name: 0.0 for name, _, _ in STRESS_BANDS}
+        unmeasured = 0.0
+        for _, level in values:
+            if level is None or level < 0:
+                unmeasured += interval_min
+                continue
+            for name, low, high in STRESS_BANDS:
+                if low <= level <= high:
+                    minutes[name] += interval_min
+                    break
+
+        return cls(
+            day=parse_date(payload.get("calendarDate")),
+            average=payload.get("avgStressLevel"),
+            max=payload.get("maxStressLevel"),
+            rest_minutes=round(minutes["rest"]),
+            low_minutes=round(minutes["low"]),
+            medium_minutes=round(minutes["medium"]),
+            high_minutes=round(minutes["high"]),
+            unmeasured_minutes=round(unmeasured),
+            samples=values if include_samples else None,
+        )
+
+
+class StepsSummary(ApiModel):
+    """A day of steps: the total and an hour-by-hour profile.
+
+    Garmin reports quarter-hour buckets in GMT; they are summed into 24 hourly
+    figures, also in GMT, with the bucket times available on request.
+    """
+
+    day: date
+    total: int = 0
+    hourly_gmt: list[int] = Field(default_factory=list, description="24 values, hour 0 to 23 GMT.")
+    buckets: list[dict[str, Any]] | None = Field(
+        default=None, description="Garmin's quarter-hour buckets, only when asked for."
+    )
+
+    @classmethod
+    def from_garmin(
+        cls, day: date, payload: list[dict[str, Any]], *, include_buckets: bool = False
+    ) -> StepsSummary:
+        hourly = [0] * 24
+        total = 0
+        for bucket in payload or []:
+            count = int(bucket.get("steps") or 0)
+            total += count
+            start = parse_dt(bucket.get("startGMT"))
+            if start is not None:
+                hourly[start.hour] += count
+        return cls(
+            day=day,
+            total=total,
+            hourly_gmt=hourly,
+            buckets=list(payload or []) if include_buckets else None,
+        )
+
+
+class DeviceSummary(ApiModel):
+    device_id: int
+    name: str | None = None
+    product: str | None = None
+    part_number: str | None = None
+    primary: bool = Field(default=False, description="The primary activity tracker.")
+    status: str | None = None
+
+    @classmethod
+    def from_garmin(cls, payload: dict[str, Any]) -> DeviceSummary:
+        return cls(
+            device_id=int(payload.get("deviceId") or 0),
+            name=payload.get("displayName"),
+            product=payload.get("productDisplayName"),
+            part_number=payload.get("partNumber"),
+            primary=bool(payload.get("primaryActivityTrackerIndicator")),
+            status=payload.get("deviceStatus"),
+        )
+
+
+class PersonalRecord(ApiModel):
+    """One personal record.
+
+    Garmin does not label its record types in this response, so ``type_id`` is
+    Garmin's own number and ``value`` is in that record's own unit: seconds
+    for a fastest time, metres for a longest distance, a count for steps.
+    """
+
+    record_id: int | None = None
+    type_id: int | None = None
+    value: float | None = None
+    activity_type: str | None = None
+    activity_id: int | None = None
+    activity_name: str | None = None
+    achieved_at: datetime | None = None
+
+    @classmethod
+    def from_garmin(cls, payload: dict[str, Any]) -> PersonalRecord:
+        return cls(
+            record_id=payload.get("id"),
+            type_id=payload.get("typeId"),
+            value=payload.get("value"),
+            activity_type=payload.get("activityType"),
+            activity_id=payload.get("activityId"),
+            activity_name=payload.get("activityName"),
+            achieved_at=parse_dt(
+                first(payload, "prStartTimeGmtFormatted", "actStartDateTimeInGMTFormatted")
+            ),
+        )
+
+
+class BodyCompositionSpec(ApiModel):
+    """One weigh-in with body composition, to write to Garmin.
+
+    Written as a FIT weight-scale file, which is how Garmin's own Index scales
+    deliver theirs, and the only route by which body fat, muscle and the rest
+    reach Garmin Connect. A plain weigh-in carries weight alone.
+    """
+
+    timestamp: datetime = Field(description="When it was measured. Needs a timezone.")
+    weight_kg: float = Field(gt=0, le=650)
+    percent_fat: float | None = Field(default=None, ge=0, le=100)
+    percent_hydration: float | None = Field(default=None, ge=0, le=100)
+    visceral_fat_mass_kg: float | None = Field(default=None, ge=0, le=650)
+    bone_mass_kg: float | None = Field(default=None, ge=0, le=650)
+    muscle_mass_kg: float | None = Field(default=None, ge=0, le=650)
+    basal_met_kcal: float | None = Field(default=None, ge=0, le=16000)
+    active_met_kcal: float | None = Field(default=None, ge=0, le=16000)
+    physique_rating: int | None = Field(default=None, ge=1, le=9)
+    metabolic_age: int | None = Field(default=None, ge=1, le=120)
+    visceral_fat_rating: int | None = Field(default=None, ge=1, le=59)
+    bmi: float | None = Field(default=None, ge=0, le=200)
+
+    @field_validator("timestamp")
+    @classmethod
+    def _aware(cls, value: datetime) -> datetime:
+        if value.tzinfo is None:
+            raise ValueError("timestamp needs a timezone, or the weigh-in lands hours off")
+        return value

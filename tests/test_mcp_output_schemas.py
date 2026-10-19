@@ -68,7 +68,16 @@ SLEEP = {
 GARMIN = {
     "get_activities": [ACTIVITY, STRENGTH],
     "get_activities_by_date": [ACTIVITY, STRENGTH],
-    "get_activity": STRENGTH,
+    # The single-activity endpoint nests its fields, unlike the list.
+    "get_activity": {
+        "activityId": 1,
+        "activityName": "Push A",
+        "activityTypeDTO": {"typeId": 13, "typeKey": "strength_training", "parentTypeId": 29},
+        "summaryDTO": {
+            "startTimeGMT": "2026-09-21T05:00:00.0",
+            "startTimeLocal": "2026-09-21T07:00:00.0",
+        },
+    },
     "get_last_activity": ACTIVITY,
     "get_activity_exercise_sets": SETS,
     "get_activity_types": TYPES,
@@ -78,6 +87,17 @@ GARMIN = {
     "get_training_readiness": [{"score": 58}],
     "get_daily_weigh_ins": {"dateWeightList": [{"weight": 81400.0, "calendarDate": "2026-10-18"}]},
     "get_body_composition": {"dateWeightList": [{"weight": 81400.0, "calendarDate": "2026-10-18"}]},
+    "get_stress_data": {
+        "calendarDate": "2026-10-18",
+        "avgStressLevel": 33,
+        "maxStressLevel": 88,
+        "stressValuesArray": [[1792296000000, -1], [1792296180000, 40]],
+    },
+    "get_steps_data": [{"startGMT": "2026-10-18T14:00:00.0", "steps": 8}],
+    "get_personal_record": [
+        {"id": 1, "typeId": 1, "value": 287.5, "prStartTimeGmtFormatted": "2025-09-14T13:20:00.0"}
+    ],
+    "get_devices": [{"deviceId": 3500000001, "displayName": "Example Watch", "deviceStatus": "active"}],
     "get_workouts": [
         {
             "workoutId": 7,
@@ -109,6 +129,11 @@ CALLS: list[tuple[str, dict[str, Any]]] = [
     ("get_activity_sets", {"activity_id": 1}),
     ("get_day_summary", {"day": "2026-10-18"}),
     ("get_sleep", {"day": "2026-10-18"}),
+    ("get_hrv", {"day": "2026-10-18"}),
+    ("get_stress", {"day": "2026-10-18"}),
+    ("get_steps", {"day": "2026-10-18"}),
+    ("get_personal_records", {}),
+    ("list_devices", {}),
     ("list_weigh_ins", {"start": "2026-10-01", "end": "2026-10-18"}),
     ("list_workouts", {}),
     ("list_scheduled_workouts", {"year": 2026, "month": 10}),
