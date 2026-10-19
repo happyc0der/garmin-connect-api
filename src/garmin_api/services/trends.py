@@ -21,6 +21,7 @@ from ..models.trends import (
     Point,
     Trend,
     choose_aggregation,
+    period_of,
     roll_up,
     summarise,
 )
@@ -47,8 +48,11 @@ def trend(
         )
     chosen = Aggregation(aggregation) if aggregation else choose_aggregation(start_d, end_d)
     daily = _daily(metric, start_d, end_d, chosen)
-    daily = [p for p in daily if start_d <= p.period <= end_d]
     native = metric in (Metric.vo2max, Metric.vo2max_cycling)
+    # A week or month Garmin grouped itself may be labelled with its first
+    # day, before a range that starts partway through it; it still belongs.
+    first = period_of(start_d, chosen) if native else start_d
+    daily = [p for p in daily if first <= p.period <= end_d]
     points = sorted(daily, key=lambda p: p.period) if native else roll_up(daily, chosen)
     return Trend(
         metric=metric,
@@ -174,7 +178,8 @@ def _daily(metric: Metric, start: date, end: date, aggregation: Aggregation) -> 
             value = entry.get("vo2MaxPreciseValue") or entry.get("vo2MaxValue")
             day = _day(entry.get("calendarDate"))
             if day and value:
-                points.append(Point(period=day, value=float(value)))
+                grouped = aggregation is not Aggregation.day
+                points.append(Point(period=day, value=float(value), days=None if grouped else 1))
 
     return points
 

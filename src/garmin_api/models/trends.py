@@ -60,7 +60,13 @@ class Aggregation(StrEnum):
 class Point(ApiModel):
     period: date = Field(description="The day, or the first day of the week or month.")
     value: float
-    days: int = Field(default=1, description="Days of data behind a weekly or monthly point.")
+    days: int | None = Field(
+        default=1,
+        description=(
+            "Days of data behind a weekly or monthly point; None when Garmin grouped the "
+            "period itself and did not say."
+        ),
+    )
     extra: dict[str, Any] | None = Field(
         default=None, description="Metric-specific detail, e.g. HRV status or body battery low."
     )
@@ -119,8 +125,11 @@ def summarise(points: list[Point], daily: list[Point]) -> dict[str, Any]:
         sorted(daily, key=lambda p: p.period)[0],
         sorted(daily, key=lambda p: p.period)[-1],
     )
+    # Points Garmin grouped itself say nothing about how many days lie behind
+    # them, so those are counted as periods.
+    counted = "days_with_data" if all(p.days == 1 for p in daily) else "periods_with_data"
     summary: dict[str, Any] = {
-        "days_with_data": len(daily),
+        counted: len(daily),
         "average": round(sum(values) / len(values), 1),
         "min": round(min(values), 1),
         "max": round(max(values), 1),
