@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
-from zoneinfo import ZoneInfo
 
 import pytest
 from pydantic import ValidationError
@@ -157,7 +156,7 @@ def test_a_weigh_in_given_in_utc_lands_on_the_local_day(fake_garmin: dict[str, A
     sent: list[Any] = []
     fake_garmin["responses"].update(
         {
-            "_user_tzinfo": ZoneInfo("America/New_York"),
+            "get_user_timezone": "America/New_York",
             "add_weigh_in": lambda *a: sent.append(a) or {},
         }
     )

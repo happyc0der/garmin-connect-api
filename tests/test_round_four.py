@@ -95,3 +95,114 @@ def test_a_zip_that_expands_too_far_is_refused_unread() -> None:
         archive.writestr("activity.fit", b"\0" * (40 * 1024 * 1024))
     with pytest.raises(InvalidRequest, match="too large"):
         decode_strength_session(buffer.getvalue())
+
+
+# --- 0.2.3's regressions: refused tokens -------------------------------------------------
+
+
+def test_a_network_failure_while_connecting_is_not_a_refusal() -> None:
+    import requests
+    from garminconnect import GarminConnectAuthenticationError
+
+    from garmin_api import auth
+
+    try:
+        try:
+            raise requests.ConnectionError("Network is unreachable")
+        except requests.ConnectionError as inner:
+            raise GarminConnectAuthenticationError("Failed to retrieve social profile") from inner
+    except GarminConnectAuthenticationError as wrapped:
+        assert isinstance(auth.translate(wrapped), GarminUnavailable)
+
+
+def test_a_private_reply_is_withheld_data_not_a_bad_login() -> None:
+    from garminconnect import GarminConnectAuthenticationError
+
+    from garmin_api import auth
+    from garmin_api.errors import NotFound
+
+    assert isinstance(
+        auth.translate(GarminConnectAuthenticationError("Authentication error")), NotFound
+    )
+
+
+def test_one_failed_connection_does_not_lock_the_server_out(no_real_tokens, monkeypatch) -> None:
+    """0.2.3 held any failure to connect against the tokens until a restart."""
+    import requests
+    from garminconnect import GarminConnectAuthenticationError
+
+    from garmin_api import auth
+
+    (no_real_tokens / "garmin_tokens.json").write_text("{}")
+    outage = {"on": True}
+
+    class FlakyGarmin:
+        def __init__(self) -> None:
+            self.client = type("C", (), {"_tokenstore_path": None})()
+
+        def login(self, tokenstore: str | None = None) -> None:
+            if outage["on"]:
+                try:
+                    raise requests.ConnectionError("down")
+                except requests.ConnectionError as inner:
+                    raise GarminConnectAuthenticationError(
+                        "Failed to retrieve social profile"
+                    ) from inner
+
+        def get_user_timezone(self) -> str:
+            return "UTC"
+
+        def whoami(self) -> str:
+            return "me"
+
+    monkeypatch.setattr(auth, "Garmin", FlakyGarmin)
+    session = auth.Session()
+    with pytest.raises(GarminUnavailable):
+        session.call("whoami")
+    outage["on"] = False
+    assert session.call("whoami") == "me"
+
+
+def test_a_401_refusal_is_held_but_heals_after_the_hold(no_real_tokens, monkeypatch) -> None:
+    from types import SimpleNamespace
+
+    from garminconnect import GarminConnectAuthenticationError
+
+    from garmin_api import auth
+    from garmin_api.errors import NotAuthenticated
+
+    (no_real_tokens / "garmin_tokens.json").write_text("{}")
+    built: list[int] = []
+
+    class RefusedGarmin:
+        def __init__(self) -> None:
+            built.append(1)
+            self.client = SimpleNamespace(_tokenstore_path=None)
+
+        def login(self, tokenstore: str | None = None) -> None:
+            cause = Exception("401")
+            cause.response = SimpleNamespace(status_code=401)  # type: ignore[attr-defined]
+            raise GarminConnectAuthenticationError("Authentication failed") from cause
+
+    monkeypatch.setattr(auth, "Garmin", RefusedGarmin)
+    session = auth.Session()
+    for _ in range(3):
+        with pytest.raises(NotAuthenticated):
+            session.client()
+    assert len(built) == 1, "refused tokens are not tried again at once"
+    monkeypatch.setattr(auth, "REFUSAL_HOLD_S", -1)
+    with pytest.raises(NotAuthenticated):
+        session.client()
+    assert len(built) == 2, "but the hold expires"
+
+
+def test_an_account_timezone_that_cannot_be_read_is_an_error_not_the_machines(
+    fake_garmin: dict[str, Any],
+) -> None:
+    from datetime import datetime
+
+    from garmin_api import auth
+
+    fake_garmin["responses"]["get_user_timezone"] = None
+    with pytest.raises(GarminUnavailable, match="timezone"):
+        auth.in_account_time(datetime(2026, 10, 19, 7, 0))

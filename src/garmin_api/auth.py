@@ -135,6 +135,30 @@ def _status_of(exc: BaseException) -> int | None:
     return None
 
 
+def _network_failure(exc: BaseException) -> bool:
+    """Whether a network error lies anywhere in ``exc``'s cause chain."""
+    import requests
+
+    seen: BaseException | None = exc
+    for _ in range(6):
+        if seen is None:
+            return False
+        if isinstance(seen, requests.RequestException) and getattr(seen, "response", None) is None:
+            return True
+        seen = seen.__cause__ or seen.__context__
+    return False
+
+
+def _refusal(exc: BaseException) -> bool:
+    """Whether Garmin itself turned the stored tokens away: a 401 or 403."""
+    return _status_of(exc) in (401, 403)
+
+
+# How long refused tokens are not tried again. Short enough that a wrongly
+# judged refusal heals itself; long enough to spare Garmin a storm of logins.
+REFUSAL_HOLD_S = 600
+
+
 def translate(exc: Exception) -> Exception:
     """Map a library or transport exception onto this package's vocabulary.
 
@@ -163,6 +187,21 @@ def translate(exc: Exception) -> Exception:
             ),
         )
     if isinstance(exc, GarminConnectAuthenticationError):
+        # The library also raises this when loading the profile fails for any
+        # reason, a dropped network included. Telling the user to log in again
+        # then would walk them toward the SSO lockout for nothing.
+        if str(exc) == "Authentication error" and _status_of(exc) is None:
+            # The library's words, and only its words, for a reply Garmin
+            # marked privacyProtected: the data is withheld, the login fine.
+            return NotFound(
+                "Garmin marks this data private and did not return it.",
+                detail="The account's privacy settings withhold it; the login is fine.",
+            )
+        if _network_failure(exc) or (_status_of(exc) or 0) >= 500:
+            return GarminUnavailable(
+                "Could not reach Garmin Connect.",
+                detail="The stored login is probably fine; try again shortly.",
+            )
         return NotAuthenticated(
             "Garmin rejected the stored credentials.",
             detail="Run `garmin login` to authenticate again.",
@@ -225,7 +264,7 @@ class Session:
         self._client_login: str | None = None
         # The stored login Garmin last refused, so calls fail at once rather
         # than each trying it again, until a new login replaces it.
-        self._refused: tuple[str | None, int] | None = None
+        self._refused: tuple[str | None, int, float] | None = None
         self._lock = threading.RLock()
 
     @property
@@ -254,28 +293,47 @@ class Session:
                     "No Garmin tokens found.",
                     detail=f"Run `garmin login` first. Tokens are stored in {self._tokens}.",
                 )
-            if self._refused is not None and self._refused == self._stored():
+            if self._held():
                 raise NotAuthenticated(
                     "Garmin rejected the stored credentials.",
                     detail="Run `garmin login` to authenticate again.",
                 )
+            # Read before building: a login landing while this one builds is
+            # then seen as new on the next call, not taken for these tokens.
+            marker = _login_marker(self._tokens)
             client = Garmin()
             try:
                 client.login(tokenstore=str(self._tokens))
             except Exception as exc:  # noqa: BLE001 -- re-raised as our own type
-                error = translate(exc)
-                if isinstance(error, NotAuthenticated):
-                    self._refused = self._stored()
-                raise error from exc
+                if _refusal(exc):
+                    self._hold()
+                raise translate(exc) from exc
             # The library loads the profile's timezone on first use, without a
             # lock, and a caller racing that load gets the machine's timezone.
             # Loaded here, under this lock, before anyone else can use it.
             if client.get_user_timezone() is None and hasattr(client, "_time_zone_loaded"):
                 client._time_zone_loaded = False  # try again on next use
             self._client = client
-            self._client_login = _login_marker(self._tokens)
+            self._client_login = marker
             self._refused = None
             return client
+
+    def _hold(self) -> None:
+        import time
+
+        self._refused = (*self._stored(), time.monotonic())
+
+    def _held(self) -> bool:
+        """Whether the tokens on disk are ones Garmin refused within the hold."""
+        import time
+
+        if self._refused is None:
+            return False
+        *stored, since = self._refused
+        if tuple(stored) != self._stored() or time.monotonic() - since > REFUSAL_HOLD_S:
+            self._refused = None
+            return False
+        return True
 
     def _stored(self) -> tuple[str | None, int]:
         """What is on disk now: the login marker and the token file's mtime."""
@@ -321,11 +379,8 @@ class Session:
             try:
                 return getattr(retry, fn_name)(*args, **kwargs)
             except Exception as retry_exc:  # noqa: BLE001
-                if _is_unauthorized(retry_exc):
-                    with self._lock:
-                        if self._client is retry:
-                            self._discard()
-                        self._refused = self._stored()
+                # The rebuild loaded the tokens, so they work: the same answer
+                # again is about this request, and nothing is held against them.
                 raise translate(retry_exc) from retry_exc
 
     def reset(self) -> None:
@@ -342,11 +397,11 @@ def _is_unauthorized(exc: Exception) -> bool:
     write's as a connection error with the response attached; both count.
     This package's own errors, such as missing tokens, never do.
     """
-    from garminconnect import GarminConnectAuthenticationError
-
     if isinstance(exc, GarminApiError):
         return False
-    return isinstance(exc, GarminConnectAuthenticationError) or _status_of(exc) == 401
+    # Only an HTTP 401: the library also raises its authentication error for
+    # a reply marked privacyProtected, which no new client will change.
+    return _status_of(exc) == 401
 
 
 _session: Session | None = None
@@ -374,7 +429,27 @@ def in_account_time(moment: datetime) -> datetime:
     """
     if moment.tzinfo is not None:
         return moment
-    return moment.replace(tzinfo=call("_user_tzinfo"))
+    return moment.replace(tzinfo=account_zone())
+
+
+def account_zone() -> Any:
+    """The Garmin account's timezone, or an error; never the machine's in its place.
+
+    The library falls back to the machine's timezone when it cannot read the
+    profile, which on a server in UTC would file a morning session hours out.
+    """
+    from zoneinfo import ZoneInfo
+
+    name = call("get_user_timezone")
+    if name:
+        try:
+            return ZoneInfo(name)
+        except Exception:  # noqa: BLE001 -- an unknown or malformed zone name
+            logger.debug("Garmin gave an unknown timezone: %r", name)
+    raise GarminUnavailable(
+        "Could not read the Garmin account's timezone.",
+        detail="Give the time with its UTC offset, or try again shortly.",
+    )
 
 
 def call(fn_name: str, *args: Any, **kwargs: Any) -> Any:

@@ -9,7 +9,6 @@ from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
-from zoneinfo import ZoneInfo
 
 import pytest
 from fastapi.testclient import TestClient
@@ -233,7 +232,7 @@ def test_a_time_with_no_offset_is_the_accounts_local_time(uploading: dict[str, A
 
     uploading["responses"].update(
         {
-            "_user_tzinfo": ZoneInfo("America/New_York"),
+            "get_user_timezone": "America/New_York",
             "upload_activity": upload,
             "connectapi": [],
             "set_activity_name": {},
