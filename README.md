@@ -163,8 +163,15 @@ would rather not have anything log in on your behalf. The reverse works too: `ga
 reads a session out of a FIT file or out of the zip Garmin's "Export Original" hands back.
 
 The file's serial number is derived from the session, so the same session always encodes to the
-same file. Garmin checks uploads for files it has already seen, and a repeat is reported with a
-status of `duplicate` rather than as a second activity.
+same file, which is what Garmin's duplicate check for activities needs. That check is not yet
+verified against a live account for strength sessions; when Garmin reports a repeat, the status
+is `duplicate`.
+
+Weigh-ins behave differently, and this has been checked live. Garmin answers every weight
+upload with "File processed" and never reports a duplicate, but it keeps one entry per identical
+measurement: the same weigh-in sent three times, even as different files, is stored once, so the
+status for those is `processed`. The same moment with different values is stored as a second
+entry.
 
 ## Tests
 

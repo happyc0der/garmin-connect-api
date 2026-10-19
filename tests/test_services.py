@@ -471,3 +471,23 @@ class TestCalendar:
         assert entry.schedule_id == 1600000001
         assert entry.workout_id == 1600000002
         assert entry.day == date(2026, 9, 28)
+
+
+def test_an_upload_with_no_activity_id_is_processed_not_created(
+    fake_garmin: dict[str, Any],
+) -> None:
+    """Weight files: Garmin says "File processed." and gives no id, ever."""
+    from garmin_api.services.uploads import _interpret_upload
+
+    result = _interpret_upload(
+        {
+            "detailedImportResult": {
+                "successes": [
+                    {"internalId": None, "messages": [{"code": 200, "content": "File processed."}]}
+                ],
+                "failures": [],
+            }
+        }
+    )
+    assert result["status"] == "processed"
+    assert result["activity_id"] is None

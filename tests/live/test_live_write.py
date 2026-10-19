@@ -116,7 +116,7 @@ def test_record_and_delete_a_body_composition_weigh_in() -> None:
         metabolic_age=24,
     )
     result = weight.add_body_composition(spec)
-    assert result["status"] in {"created", "duplicate", "unknown"}, result
+    assert result["status"] == "processed", result
 
     found = [w for w in weight.day_weigh_ins(moment.date()) if w.weight_kg == 72.4]
     try:

@@ -79,7 +79,12 @@ def download(
     carries the set messages. It arrives as a zip archive.
     """
     data = service.download(activity_id, fmt)  # type: ignore[arg-type]
-    media = "application/zip" if fmt == "fit" else "application/octet-stream"
+    media = {
+        "fit": "application/zip",
+        "tcx": "application/vnd.garmin.tcx+xml",
+        "gpx": "application/gpx+xml",
+        "csv": "text/csv",
+    }[fmt]
     suffix = "zip" if fmt == "fit" else fmt
     return Response(
         content=data,

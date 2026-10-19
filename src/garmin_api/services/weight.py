@@ -46,8 +46,10 @@ def add_body_composition(spec: BodyCompositionSpec) -> dict[str, Any]:
     """Record a weigh-in with body composition: fat, water, muscle, bone and more.
 
     Uploaded as a FIT weight-scale file, the same way Garmin's own scales send
-    theirs. The file's serial comes from the measurement, so recording the same
-    weigh-in twice is reported as a duplicate rather than stored twice.
+    theirs. Garmin answers every such upload with "processed" and never says
+    whether it was new, but it keeps one entry per identical measurement: the
+    same weigh-in sent three times, even as different files, is stored once.
+    The same moment with different values is stored as a second entry.
     """
     import tempfile
     from pathlib import Path

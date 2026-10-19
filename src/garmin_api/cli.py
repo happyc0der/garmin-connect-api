@@ -31,15 +31,40 @@ def _print(value: Any) -> None:
     typer.echo(json.dumps(value, indent=2, default=str))
 
 
+def _fail(message: str, detail: str | None = None) -> typer.Exit:
+    typer.secho(message, fg=typer.colors.RED, err=True)
+    if detail:
+        typer.secho(detail, fg=typer.colors.YELLOW, err=True)
+    return typer.Exit(code=1)
+
+
 def _run(fn: Any, *args: Any, **kwargs: Any) -> Any:
-    """Run a service call, turning our errors into clean CLI failures."""
+    """Run a call, turning expected failures into a message instead of a traceback."""
+    from pydantic import ValidationError
+
     try:
         return fn(*args, **kwargs)
     except GarminApiError as exc:
-        typer.secho(f"{exc.message}", fg=typer.colors.RED, err=True)
-        if exc.detail:
-            typer.secho(exc.detail, fg=typer.colors.YELLOW, err=True)
-        raise typer.Exit(code=1) from exc
+        raise _fail(exc.message, exc.detail) from exc
+    except ValidationError as exc:
+        problems = "; ".join(
+            f"{'.'.join(str(p) for p in e['loc']) or 'file'}: {e['msg']}" for e in exc.errors()[:5]
+        )
+        raise _fail("The spec file is not valid.", problems) from exc
+    except FileNotFoundError as exc:
+        raise _fail(f"No such file: {exc.filename}") from exc
+
+
+def _read(path: Path) -> str:
+    if not path.is_file():
+        raise _fail(f"No such file: {path}")
+    return path.read_text()
+
+
+def _read_bytes(path: Path) -> bytes:
+    if not path.is_file():
+        raise _fail(f"No such file: {path}")
+    return path.read_bytes()
 
 
 @app.command()
@@ -65,9 +90,11 @@ def login(
 @app.command()
 def logout() -> None:
     """Delete the stored tokens."""
+    # Only this package's own token files. The directory may be shared with
+    # other Garmin tools through GARMINTOKENS, and their files are theirs.
     directory = auth.token_dir()
     removed = 0
-    for file in directory.glob("*.json"):
+    for file in auth._token_files():
         file.unlink()
         removed += 1
     auth.session().reset()
@@ -190,7 +217,7 @@ def log_session(spec_file: Path) -> None:
     from .models.workouts import StrengthSessionSpec
     from .services import uploads as service
 
-    spec = StrengthSessionSpec.model_validate_json(spec_file.read_text())
+    spec = _run(StrengthSessionSpec.model_validate_json, _read(spec_file))
     _print(_run(service.log_strength_session, spec))
 
 
@@ -204,8 +231,8 @@ def encode_session(spec_file: Path, out: Path = Path("session.fit")) -> None:
     from .fit import encode_strength_session
     from .models.workouts import StrengthSessionSpec
 
-    spec = StrengthSessionSpec.model_validate_json(spec_file.read_text())
-    out.write_bytes(encode_strength_session(spec))
+    spec = _run(StrengthSessionSpec.model_validate_json, _read(spec_file))
+    out.write_bytes(_run(encode_strength_session, spec))
     typer.echo(f"Wrote {out} ({spec.total_sets} sets)")
 
 
@@ -217,8 +244,8 @@ def decode_fit(path: Path) -> None:
     """
     from .fit import decode_strength_session
 
-    spec = decode_strength_session(path.read_bytes())
-    _print(spec.model_dump(exclude_none=True))
+    spec = _run(decode_strength_session, _read_bytes(path))
+    _print(spec.model_dump(mode="json", exclude_none=True))
 
 
 @workout_app.command("list")
@@ -236,7 +263,7 @@ def workout_create(spec_file: Path) -> None:
     from .models.workouts import StrengthWorkoutSpec
     from .services import workouts as service
 
-    spec = StrengthWorkoutSpec.model_validate_json(spec_file.read_text())
+    spec = _run(StrengthWorkoutSpec.model_validate_json, _read(spec_file))
     created = _run(service.create_strength, spec)
     _print(created.model_dump(exclude_none=True, exclude={"raw"}))
 

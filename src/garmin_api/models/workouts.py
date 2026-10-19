@@ -133,6 +133,17 @@ class StrengthSessionSpec(ApiModel):
     exercises: list[StrengthSessionExercise] = Field(min_length=1)
     notes: str | None = Field(default=None, max_length=1024)
 
+    @field_validator("start_time")
+    @classmethod
+    def _aware(cls, value: datetime) -> datetime:
+        # Without an offset the encoder could only guess UTC, and a 7am
+        # session in New York would land in Garmin at 3am.
+        if value.tzinfo is None:
+            raise ValueError(
+                "start_time needs a timezone offset, e.g. 2026-09-21T07:00:00-04:00"
+            )
+        return value
+
     @property
     def total_sets(self) -> int:
         return sum(len(e.sets) for e in self.exercises)

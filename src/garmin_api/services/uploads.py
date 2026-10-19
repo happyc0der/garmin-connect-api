@@ -112,11 +112,14 @@ def _interpret_upload(response: Any) -> dict[str, Any]:
 
     if successes:
         first = successes[0]
-        return {
-            "status": "created",
-            "activity_id": first.get("internalId") or first.get("id"),
-            "raw": payload,
-        }
+        activity_id = first.get("internalId") or first.get("id")
+        if activity_id is None:
+            # Weight and other non-activity files: Garmin answers "File
+            # processed." with no id, and never signals a duplicate. Verified
+            # live: an identical weigh-in uploaded three times is kept once,
+            # so "processed" is all that can honestly be said.
+            return {"status": "processed", "activity_id": None, "raw": payload}
+        return {"status": "created", "activity_id": activity_id, "raw": payload}
 
     if failures:
         messages = [

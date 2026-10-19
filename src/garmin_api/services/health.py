@@ -53,8 +53,18 @@ def stats(day: date | str) -> Any:
 
 
 def sleep(day: date | str, *, include_raw: bool = False) -> SleepSummary | None:
+    """One night's sleep, or None if none was recorded.
+
+    Garmin answers a night with no data with a full skeleton of nulls, which
+    is reported as None rather than as a summary of nothing.
+    """
     payload = _safe("get_sleep_data", as_date_str(day))
-    return SleepSummary.from_garmin(payload, include_raw=include_raw) if payload else None
+    if not payload:
+        return None
+    summary = SleepSummary.from_garmin(payload, include_raw=include_raw)
+    if summary.total_sleep_s is None and summary.start is None:
+        return None
+    return summary
 
 
 def hrv(day: date | str) -> Any:

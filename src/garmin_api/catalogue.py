@@ -57,11 +57,63 @@ def _by_lower_name() -> dict[str, Exercise]:
     return {e.name.lower(): e for e in all_exercises()}
 
 
+# Gym names Garmin's catalogue does not use, mapped to the words it does.
+# Each target was checked to find the intended exercise.
+ALIASES = {
+    "rdl": "romanian deadlift",
+    "ohp": "shoulder press",
+    "overhead press": "shoulder press",
+    "skull crusher": "lying triceps extension",
+    "skullcrusher": "lying triceps extension",
+    "chinup": "chin up",
+}
+
+
+def _words(value: str) -> list[str]:
+    """Lowercase alphanumeric words: "Lat Pull-down" -> ["lat", "pull", "down"]."""
+    import re
+
+    return re.findall(r"[a-z0-9]+", value.lower())
+
+
+def _starts(word: str, token: str) -> bool:
+    """A query word starts a name word, tolerating a plural: "dips" finds "Dip"."""
+    if word.startswith(token):
+        return True
+    return len(token) >= 3 and token.endswith("s") and word.startswith(token[:-1])
+
+
 def search(term: str, limit: int = 20) -> list[Exercise]:
-    """Exercises whose display name contains ``term``, case-insensitively."""
-    needle = term.lower().strip()
-    hits = [e for e in all_exercises() if needle in e.name.lower()]
-    return hits[:limit]
+    """Exercises matching ``term``, best match first.
+
+    A name matches when every word of the query starts one of its words, so
+    "pull up" finds "Pull-up" and "lat pulldown" finds "Lat Pull-down", while
+    "rdl" no longer matches inside "Hurdle". A query of five or more letters
+    also matches with spaces and hyphens ignored, so "pullup" works too.
+    Common gym names Garmin does not use, like "skull crusher", are aliased.
+    """
+    query = " ".join(_words(term))
+    query = ALIASES.get(query, ALIASES.get(query.replace(" ", ""), query))
+    tokens = _words(query)
+    if not tokens:
+        return []
+    joined = "".join(tokens)
+
+    scored: list[tuple[int, int, str, Exercise]] = []
+    for exercise in all_exercises():
+        words = _words(exercise.name)
+        flat = "".join(words)
+        if words == tokens:
+            rank = 0
+        elif all(any(_starts(w, tok) for w in words) for tok in tokens):
+            rank = 1
+        elif len(joined) >= 5 and joined in flat:
+            rank = 2
+        else:
+            continue
+        scored.append((rank, len(words), exercise.name, exercise))
+    scored.sort(key=lambda row: row[:3])
+    return [row[3] for row in scored[:limit]]
 
 
 def resolve(name: str) -> Exercise | None:

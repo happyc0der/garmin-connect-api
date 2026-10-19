@@ -25,7 +25,7 @@ from typing import Any
 
 from garminconnect import Garmin
 
-from .errors import GarminUnavailable, NotAuthenticated, RateLimited
+from .errors import GarminUnavailable, InvalidRequest, NotAuthenticated, NotFound, RateLimited
 
 logger = logging.getLogger(__name__)
 
@@ -86,11 +86,37 @@ def token_age_days() -> float | None:
     return (datetime.now(UTC).timestamp() - newest) / 86400
 
 
+def _status_of(exc: BaseException) -> int | None:
+    """The HTTP status behind a library error, if it carries one.
+
+    python-garminconnect keeps the original response on ``.response`` and also
+    writes the status into the message, as in "client error (404)".
+    """
+    response = getattr(exc, "response", None)
+    status = getattr(response, "status_code", None)
+    if isinstance(status, int):
+        return status
+    import re
+
+    match = re.search(r"\((\d{3})\)|API Error (\d{3})", str(exc))
+    if match:
+        return int(match.group(1) or match.group(2))
+    return None
+
+
 def translate(exc: Exception) -> Exception:
-    """Map a library or transport exception onto this package's vocabulary."""
+    """Map a library or transport exception onto this package's vocabulary.
+
+    The distinction that matters most to a caller is between Garmin answering
+    "no" and Garmin not answering at all. A missing activity is a 404 and a
+    malformed request a 400; only a network failure means Garmin could not be
+    reached, and only a 5xx means Garmin itself is having trouble.
+    """
     from garminconnect import (
         GarminConnectAuthenticationError,
         GarminConnectConnectionError,
+        GarminConnectInvalidFileFormatError,
+        GarminConnectNotFoundError,
         GarminConnectTooManyRequestsError,
     )
 
@@ -107,8 +133,25 @@ def translate(exc: Exception) -> Exception:
             "Garmin rejected the stored credentials.",
             detail="Run `garmin login` to authenticate again.",
         )
+    if isinstance(exc, GarminConnectNotFoundError):
+        return NotFound("Garmin has no such item.", detail=str(exc))
+    if isinstance(exc, GarminConnectInvalidFileFormatError):
+        return InvalidRequest("Garmin does not accept this file format.", detail=str(exc))
     if isinstance(exc, GarminConnectConnectionError):
+        status = _status_of(exc)
+        if status == 404:
+            return NotFound("Garmin has no such item.", detail=str(exc))
+        if status is not None and 400 <= status < 500:
+            return InvalidRequest(f"Garmin rejected the request ({status}).", detail=str(exc))
+        if status is not None and status >= 500:
+            return GarminUnavailable(
+                f"Garmin answered with a server error ({status}).",
+                detail="The library already retried. Try again later.",
+            )
         return GarminUnavailable("Could not reach Garmin Connect.", detail=str(exc))
+    if isinstance(exc, (ValueError, TypeError)):
+        # Raised by the library's own input checks before any request is made.
+        return InvalidRequest("Garmin's client refused the input.", detail=str(exc))
     return exc
 
 

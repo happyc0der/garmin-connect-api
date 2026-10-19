@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import date
 from typing import Any
 
-from fastapi import APIRouter, Body, Query
+from fastapi import APIRouter, Body, Path, Query
 
 from ...models.health import DeviceSummary
 from ...models.workouts import ScheduledWorkout, StrengthWorkoutSpec, WorkoutSummary
@@ -27,7 +27,9 @@ def list_workouts(
     operation_id="list_scheduled_workouts",
     response_model=list[ScheduledWorkout],
 )
-def scheduled(year: int, month: int) -> list[ScheduledWorkout]:
+def scheduled(
+    year: int = Path(ge=2000, le=2100), month: int = Path(ge=1, le=12)
+) -> list[ScheduledWorkout]:
     """Calendar entries for one month. Month is 1 to 12."""
     return service.scheduled(year, month)
 

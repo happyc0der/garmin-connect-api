@@ -119,8 +119,8 @@ def add_body_composition(spec: BodyCompositionSpec) -> dict[str, Any]:
     """Record a weigh-in with body composition: fat, water, muscle, bone, BMI.
 
     This is the way to bring a smart scale's full reading into Garmin. A plain
-    add_weigh_in carries weight only. Recording the same measurement twice is
-    reported as a duplicate.
+    add_weigh_in carries weight only. Garmin reports every upload as
+    "processed"; an identical measurement sent again is still kept only once.
     """
     return weight_service.add_body_composition(spec)
 
