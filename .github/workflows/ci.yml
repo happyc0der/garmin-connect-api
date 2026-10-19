@@ -21,8 +21,11 @@ jobs:
       - uses: astral-sh/setup-uv@v10.3.0
         with:
           python-version: ${{ matrix.python }}
+          # The runner's own Python is externally managed (3.12) or absent
+          # (3.13), so everything installs into a venv that later steps use.
+          activate-environment: true
       - name: Install
-        run: uv pip install --system -e ".[dev]"
+        run: uv pip install -e ".[dev]"
       - name: Lint
         run: ruff check src tests && ruff format --check src tests
       - name: Types

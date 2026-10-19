@@ -19,6 +19,7 @@ jobs:
       - uses: astral-sh/setup-uv@v10.3.0
         with:
           python-version: "3.12"
+          activate-environment: true
       - name: Versions agree
         run: |
           tag="${GITHUB_REF_NAME#v}"
@@ -29,7 +30,7 @@ jobs:
           test "$tag" = "$project" && test "$tag" = "$server" && test "$tag" = "$package"
       - name: Tests
         run: |
-          uv pip install --system -e ".[dev]"
+          uv pip install -e ".[dev]"
           ruff check src tests
           mypy src
           pytest tests -p no:warnings
