@@ -1,0 +1,32 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.happyc0der/garmin-connect-api",
+  "title": "Garmin Connect",
+  "description": "Read and write Garmin Connect: activities, strength sets, health data, workouts and weigh-ins.",
+  "repository": {
+    "url": "https://github.com/happyc0der/garmin-connect-api",
+    "source": "github"
+  },
+  "version": "0.1.0",
+  "packages": [
+    {
+      "registryType": "pypi",
+      "registryBaseUrl": "https://pypi.org",
+      "identifier": "garmin-connect-api",
+      "version": "0.1.0",
+      "runtimeHint": "uvx",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "GARMINTOKENS",
+          "description": "Directory holding the tokens `garmin login` writes. Defaults to ~/.garmin-api/default.",
+          "isRequired": false,
+          "isSecret": false,
+          "format": "filepath"
+        }
+      ]
+    }
+  ]
+}

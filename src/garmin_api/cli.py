@@ -341,5 +341,17 @@ def version() -> None:
     typer.echo(__version__)
 
 
+def mcp_entry() -> None:
+    """``uvx garmin-connect-api``: start the MCP server over stdio.
+
+    MCP clients launch a server by running its package, so the package's own
+    command starts the server directly. Everything else, including logging
+    in, is under the ``garmin`` command.
+    """
+    from .mcp import create_mcp
+
+    create_mcp().run(transport="stdio", show_banner=False)
+
+
 if __name__ == "__main__":
     app()

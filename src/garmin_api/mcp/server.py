@@ -15,6 +15,7 @@ from typing import Any
 
 from fastmcp import FastMCP
 from fastmcp.server.providers.openapi import MCPType, RouteMap
+from mcp.types import ToolAnnotations
 
 from .. import __version__, auth, catalogue
 from ..errors import NotAuthenticated, RateLimited
@@ -38,6 +39,57 @@ can lock the account out for a day or more.
 """.strip()
 
 
+# Paths answered entirely from the bundled catalogue or the service itself:
+# they never reach Garmin, so they are not "open world".
+LOCAL_PATHS = ("/healthz", "/v1/exercises/")
+
+
+def _annotate(route: Any, component: Any) -> None:
+    """Tell the client what each generated tool does to the account.
+
+    Derived from the HTTP method, which is what the API already promises: GET
+    reads and changes nothing; DELETE removes data; PATCH overwrites it (a
+    rename loses the old name); POST adds something new. Clients use these to
+    decide what may run without asking.
+    """
+    method = str(getattr(route, "method", "GET")).upper()
+    path = str(getattr(route, "path", ""))
+    reaches_garmin = not path.startswith(LOCAL_PATHS)
+    if method == "GET":
+        hints = ToolAnnotations(
+            read_only_hint=True, idempotent_hint=True, open_world_hint=reaches_garmin
+        )
+    elif method in ("DELETE", "PATCH", "PUT"):
+        hints = ToolAnnotations(
+            read_only_hint=False, destructive_hint=True, idempotent_hint=True, open_world_hint=True
+        )
+    else:
+        hints = ToolAnnotations(
+            read_only_hint=False,
+            destructive_hint=False,
+            idempotent_hint=False,
+            open_world_hint=True,
+        )
+    hints.title = _title(str(getattr(route, "operation_id", "") or getattr(component, "name", "")))
+    if hasattr(component, "annotations"):
+        component.annotations = hints
+
+
+ACRONYMS = {"hrv": "HRV", "fit": "FIT", "dto": "DTO", "id": "ID"}
+TITLES = {"healthz": "Service health"}
+
+
+def _title(operation_id: str) -> str:
+    """A readable title from an operation id: delete_activity -> "Delete activity"."""
+    if operation_id in TITLES:
+        return TITLES[operation_id]
+    words = [ACRONYMS.get(w, w) for w in operation_id.split("_") if w]
+    if not words:
+        return operation_id
+    first = words[0] if words[0].isupper() else words[0].capitalize()
+    return " ".join([first, *words[1:]]).replace("weigh in", "weigh-in")
+
+
 def create_mcp() -> FastMCP:
     app = create_app()
 
@@ -54,6 +106,7 @@ def create_mcp() -> FastMCP:
     mcp = FastMCP.from_fastapi(
         app=app,
         httpx_client_kwargs=client_kwargs,
+        mcp_component_fn=_annotate,
         name="garmin",
         instructions=INSTRUCTIONS,
         route_maps=[
@@ -96,7 +149,11 @@ def create_mcp() -> FastMCP:
 def _add_convenience_tools(mcp: FastMCP) -> None:
     """Tools that answer a question rather than mirror an endpoint."""
 
-    @mcp.tool
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Garmin status", read_only_hint=True, idempotent_hint=True, open_world_hint=False
+        )
+    )
     def garmin_status() -> dict[str, Any]:
         """Check whether this server can reach the Garmin account.
 
@@ -111,7 +168,11 @@ def _add_convenience_tools(mcp: FastMCP) -> None:
             "hint": None if auth.has_tokens() else "Run `garmin login` in a terminal.",
         }
 
-    @mcp.tool
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Find exercise", read_only_hint=True, idempotent_hint=True, open_world_hint=False
+        )
+    )
     def find_exercise(query: str, limit: int = 10) -> list[dict[str, str]]:
         """Find Garmin's category and exercise_name for an exercise.
 
@@ -120,7 +181,14 @@ def _add_convenience_tools(mcp: FastMCP) -> None:
         """
         return [e._asdict() for e in catalogue.search(query, limit=limit)]
 
-    @mcp.tool
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Recent strength sessions",
+            read_only_hint=True,
+            idempotent_hint=True,
+            open_world_hint=True,
+        )
+    )
     def recent_strength_sessions(count: int = 5, include_sets: bool = True) -> list[dict[str, Any]]:
         """Recent strength workouts, with their sets.
 
@@ -161,7 +229,11 @@ def _add_convenience_tools(mcp: FastMCP) -> None:
             results.append(entry)
         return results
 
-    @mcp.tool
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Week summary", read_only_hint=True, idempotent_hint=True, open_world_hint=True
+        )
+    )
     def week_summary(end_day: str | None = None) -> dict[str, Any]:
         """Seven days of training and health in one answer.
 

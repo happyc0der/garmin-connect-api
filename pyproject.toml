@@ -1,22 +1,50 @@
 [project]
 name = "garmin-connect-api"
 version = "0.1.0"
-description = "A read/write API for Garmin Connect: typed library, local HTTP service, and MCP server"
+description = "Read and write Garmin Connect from Python, HTTP or an MCP client: activities, strength sets, health data, workouts, weigh-ins"
 readme = "README.md"
-license = { text = "MIT" }
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "happyc0der" }]
 requires-python = ">=3.12"
+keywords = ["garmin", "garmin-connect", "mcp", "model-context-protocol", "fitness", "strength-training", "fit", "fastapi"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Intended Audience :: End Users/Desktop",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Medical Science Apps.",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Typing :: Typed",
+]
 dependencies = [
-    "garminconnect>=0.3.19",
-    "pydantic>=2.9",
+    # The unofficial client this wraps. Garmin's private endpoints move, and
+    # 0.3.x has broken compatibility within minor versions before, so the
+    # upper bound is deliberate: a new minor gets tested before it is allowed.
+    "garminconnect>=0.3.19,<0.4",
+    "pydantic>=2.9,<3",
     "fastapi>=0.115",
     "uvicorn>=0.32",
-    "fastmcp>=4.0",
-    "fit-tool>=0.9.13",
+    "fastmcp>=4.0,<5",
+    "fit-tool>=0.9.13,<1",
     "typer>=0.15",
     "httpx>=0.27",
 ]
 
+[project.urls]
+Homepage = "https://github.com/happyc0der/garmin-connect-api"
+Repository = "https://github.com/happyc0der/garmin-connect-api"
+Issues = "https://github.com/happyc0der/garmin-connect-api/issues"
+Changelog = "https://github.com/happyc0der/garmin-connect-api/blob/main/CHANGELOG.md"
+
 [project.scripts]
+# `uvx garmin-connect-api` starts the MCP server over stdio, as MCP clients
+# expect; `garmin` is the full command line, including `garmin login`.
+garmin-connect-api = "garmin_api.cli:mcp_entry"
 garmin = "garmin_api.cli:app"
 
 [project.optional-dependencies]
@@ -36,6 +64,10 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/garmin_api"]
+
+[tool.hatch.build.targets.sdist]
+# Tests travel with the source; the live ones skip themselves without a login.
+include = ["src/garmin_api", "tests", "examples", "README.md", "LICENSE", "CHANGELOG.md", "SECURITY.md", "server.json"]
 
 [tool.ruff]
 line-length = 100

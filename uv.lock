@@ -685,13 +685,13 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "fastapi", specifier = ">=0.115" },
-    { name = "fastmcp", specifier = ">=4.0" },
-    { name = "fit-tool", specifier = ">=0.9.13" },
-    { name = "garminconnect", specifier = ">=0.3.19" },
+    { name = "fastmcp", specifier = ">=4.0,<5" },
+    { name = "fit-tool", specifier = ">=0.9.13,<1" },
+    { name = "garminconnect", specifier = ">=0.3.19,<0.4" },
     { name = "httpx", specifier = ">=0.27" },
     { name = "jsonschema", marker = "extra == 'dev'", specifier = ">=4.23" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.13" },
-    { name = "pydantic", specifier = ">=2.9" },
+    { name = "pydantic", specifier = ">=2.9,<3" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.3" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.24" },
     { name = "rfc3339-validator", marker = "extra == 'dev'", specifier = ">=0.1.4" },

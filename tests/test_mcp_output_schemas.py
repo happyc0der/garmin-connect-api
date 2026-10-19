@@ -102,7 +102,9 @@ GARMIN = {
     "get_personal_record": [
         {"id": 1, "typeId": 1, "value": 287.5, "prStartTimeGmtFormatted": "2025-09-14T13:20:00.0"}
     ],
-    "get_devices": [{"deviceId": 3500000001, "displayName": "Example Watch", "deviceStatus": "active"}],
+    "get_devices": [
+        {"deviceId": 3500000001, "displayName": "Example Watch", "deviceStatus": "active"}
+    ],
     "get_workouts": [
         {
             "workoutId": 7,

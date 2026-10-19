@@ -65,3 +65,53 @@ def test_status_tool_works_without_tokens() -> None:
 def test_instructions_warn_about_rate_limits() -> None:
     mcp = create_mcp()
     assert "rate limiting" in (mcp.instructions or "")
+
+
+def test_every_tool_says_what_it_does_to_the_account(tools: dict[str, object]) -> None:
+    """Clients use these hints to decide what may run without asking."""
+    missing = [name for name, tool in tools.items() if getattr(tool, "annotations", None) is None]
+    assert missing == []
+
+
+def test_deleting_and_overwriting_tools_are_marked_destructive(tools: dict[str, object]) -> None:
+    destructive = {
+        name
+        for name, tool in tools.items()
+        if tool.annotations.destructive_hint  # type: ignore[attr-defined]
+    }
+    assert destructive == {
+        "delete_activity",
+        "delete_workout",
+        "delete_weigh_in",
+        "unschedule_workout",
+        "update_activity",
+    }
+
+
+def test_reading_tools_are_marked_read_only(tools: dict[str, object]) -> None:
+    for name in ("list_activities", "get_day_summary", "get_activity_sets", "week_summary"):
+        assert tools[name].annotations.read_only_hint is True, name  # type: ignore[attr-defined]
+    for name in ("log_strength_session", "create_strength_workout", "add_body_composition"):
+        assert tools[name].annotations.read_only_hint is False, name  # type: ignore[attr-defined]
+
+
+def test_only_garmin_calls_are_open_world(tools: dict[str, object]) -> None:
+    """The catalogue and status answer offline; everything else reaches Garmin."""
+    local = {name for name, tool in tools.items() if tool.annotations.open_world_hint is False}  # type: ignore[attr-defined]
+    assert local == {
+        "healthz",
+        "garmin_status",
+        "find_exercise",
+        "search_exercises",
+        "match_exercise",
+    }
+
+
+def test_every_tool_has_a_readable_title(tools: dict[str, object]) -> None:
+    """Directories require a title; derived from the operation id, not FastAPI's "Delete"."""
+    titles = {name: tool.annotations.title for name, tool in tools.items()}  # type: ignore[attr-defined]
+    assert all(titles.values())
+    assert titles["delete_activity"] == "Delete activity"
+    assert titles["get_hrv"] == "Get HRV"
+    assert titles["add_weigh_in"] == "Add weigh-in"
+    assert titles["healthz"] == "Service health"

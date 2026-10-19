@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Python ${{ matrix.python }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.3.0
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install
+        run: uv pip install --system -e ".[dev]"
+      - name: Lint
+        run: ruff check src tests && ruff format --check src tests
+      - name: Types
+        run: mypy src
+      # Offline only. The live tests skip themselves without GARMIN_LIVE=1 and
+      # a login, and they must never run in CI against anyone's account.
+      - name: Tests
+        run: pytest tests -p no:warnings
+      - name: Build
+        run: uv build && uvx twine check dist/*

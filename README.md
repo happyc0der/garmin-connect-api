@@ -1,67 +1,124 @@
 # garmin-connect-api
 
-Read and write Garmin Connect from Python, from HTTP, or from Claude.
+Read and write Garmin Connect from an MCP client such as Claude, from Python, or over a local HTTP
+API: activities with per-set strength detail, daily health data, planned workouts, completed
+strength sessions, and weigh-ins with full body composition.
 
-One core with three faces: a typed library, a local HTTP service, and an MCP server generated
-from that service so the tools can never drift from the API.
+<!-- mcp-name: io.github.happyc0der/garmin-connect-api -->
+
+> **Unofficial.** Not affiliated with or endorsed by Garmin. It uses the same private endpoints as
+> the Garmin Connect website, through [python-garminconnect](https://github.com/cyberjunky/python-garminconnect),
+> because Garmin offers no public API for individuals. Those endpoints can change without notice,
+> and using them is not sanctioned by Garmin's terms. It is meant for your own account and your
+> own data.
+
+## Quick start
+
+You need [uv](https://docs.astral.sh/uv/) and Python 3.12 or newer.
+
+**1. Log in once**, at a terminal:
 
 ```bash
-garmin login                      # once, at a terminal
-garmin activities --type strength_training
-garmin sets 987654321
-garmin log-session examples/session.json
-garmin serve                      # http://127.0.0.1:8765/docs
-garmin mcp                        # stdio, for Claude
+uvx --from garmin-connect-api garmin login
 ```
+
+This is the only place a password is ever typed. It asks for your Garmin email, password and any
+multi-factor code, then stores tokens in `~/.garmin-api/default`, readable by your user only.
+Nothing else ever prompts for a password; without tokens, every tool says to run this.
+
+**2. Add the server to your MCP client.**
+
+Claude Code:
+
+```bash
+claude mcp add --scope user --transport stdio garmin -- uvx garmin-connect-api
+```
+
+Claude Desktop, in `claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "garmin": {
+      "command": "uvx",
+      "args": ["garmin-connect-api"]
+    }
+  }
+}
+```
+
+**3. Ask.** "How did I sleep this week?", "Show my last three strength sessions with their sets",
+"Schedule a push day for Thursday: bench 3x8 at 60 kg, overhead press 3x10 at 35 kg".
 
 ## What it can do
 
-**Read.** Activities with their per-set strength detail: exercise, reps, weight, duration, and
-the training volume computed from them. Daily health: steps, heart rate, stress, body battery,
-sleep with stages, heart rate variability, training readiness and status, body weight and
-composition. Original activity files in FIT, TCX, GPX or CSV.
+37 tools, each annotated so your client knows which only read (25), which add something (7) and
+which delete or overwrite (5), and can ask before running those.
 
-**Write.** Strength workouts onto the Garmin calendar, scheduled and pushed to a watch.
-Completed strength sessions into the activity history, with every set intact. Activity renames,
-type changes and deletions. Weigh-ins, including full body composition from a smart scale: fat,
-water, muscle, bone, BMI and metabolic age, written the way Garmin's own Index scales write them.
+| Read | Write |
+| --- | --- |
+| Activities, filtered by type and date | Create a strength workout, schedule it, push it to a watch |
+| Per-set strength detail: exercise, reps, weight | Log a completed strength session, with every set |
+| A day in one answer: steps, heart rate, stress, body battery, sleep, HRV, readiness | Record a weigh-in, or a full body composition reading |
+| Sleep, HRV, stress, steps, training readiness and status | Rename an activity or change its description |
+| Every weigh-in with body composition | Delete an activity, workout or weigh-in |
+| Planned workouts and the calendar | |
+| Garmin's 1,527-exercise catalogue, offline | |
 
-Logging a completed session is the part Garmin's own developer programme has never offered.
-Their Training API publishes plans; nothing in it uploads a finished workout. This encodes the
-session as a FIT file with set messages and posts it to the upload service, which is what the
-Connect website itself uses.
+Four tools are written for a model rather than mirrored from an endpoint: `garmin_status` checks
+the login without calling Garmin, `find_exercise` finds Garmin's name for a lift, and
+`recent_strength_sessions` and `week_summary` answer common questions in one call.
 
-## Install
+**Logging a finished workout** is the write Garmin's own developer programme has never offered. A
+session is encoded as a FIT activity file with set messages and uploaded, so it appears in Garmin
+Connect as a Strength Training activity, exercise by exercise.
 
-Needs Python 3.12 or newer.
+**Body composition** from a smart scale (fat, water, skeletal muscle, bone, BMI, basal metabolic
+rate, visceral fat) is written as a FIT weight-scale file, the way Garmin's own Index scales do it.
+A plain weigh-in carries weight alone.
+
+## Before you write anything
+
+- **Activities you log may be shared automatically.** If your Garmin account is connected to Strava
+  or another app, an uploaded session can be posted there too, and deleting it from Garmin does not
+  delete it there.
+- **Rate limits are taken seriously.** Garmin puts Cloudflare and per-account rate limits in front
+  of its login, and a run of failed logins can lock an account out for a day or more. Nothing here
+  retries a login, and a rate limit stops every call path rather than being retried. If you see
+  one, wait.
+- **Exercises need Garmin's own names**, such as `BENCH_PRESS` / `BARBELL_BENCH_PRESS`. Every write
+  checks them against the catalogue first and suggests near misses, so a typo fails with a useful
+  message rather than Garmin's bare 400. Common gym names work in search: "rdl", "ohp", "pull ups".
+- **Sessions and body-composition readings need a timezone offset**, or a 7am reading would land
+  hours out. They are refused without one.
+
+## Command line
 
 ```bash
-uv venv --python 3.12
-uv pip install -e ".[dev]"
+garmin doctor                          # setup check, no network
+garmin activities --type strength_training --limit 5
+garmin sets <activity-id>              # per-set detail
+garmin day 2026-10-18                  # one day of health data
+garmin exercises "lat pulldown"        # search the catalogue, offline
+garmin workout create workout.json     # plan a strength workout
+garmin log-session session.json        # log a completed one
+garmin encode-session session.json     # build its FIT file without uploading
+garmin decode-fit activity.zip         # read sets out of a Garmin export
+garmin serve                           # the HTTP API on 127.0.0.1:8765
 ```
 
-## Logging in
+Run them with `uvx --from garmin-connect-api garmin ...`, or install with
+`uv tool install garmin-connect-api`. Example specs:
+[session.json](https://github.com/happyc0der/garmin-connect-api/blob/main/examples/session.json),
+[workout.json](https://github.com/happyc0der/garmin-connect-api/blob/main/examples/workout.json).
 
-```bash
-garmin login
-```
+An encoded session file can also be imported by hand on the Garmin Connect website, if you would
+rather nothing logged in on your behalf.
 
-The only place a password is ever typed. It prompts for the password and any multi-factor code,
-then stores tokens under `~/.garmin-api/default`. The HTTP service and the MCP server read those
-tokens and never prompt for anything; without them they answer 401 and tell you to run this.
-
-Point `GARMINTOKENS` at another directory to store them elsewhere, or to share a login with
-other tools that read the same format.
-
-**On rate limits.** Garmin put Cloudflare fingerprinting and per-account rate buckets in front
-of its login endpoints in March 2026. A run of failed logins can lock an account out for a day
-or more. Nothing in this package retries a login, and a 429 from Garmin is surfaced as a 429
-with an explanation rather than being swallowed and retried. If you see one, wait.
-
-## Library
+## Python library
 
 ```python
-from datetime import datetime, UTC
+from datetime import datetime, timedelta, timezone
 from garmin_api.services import activities, health, uploads
 from garmin_api.models.workouts import (
     StrengthSessionSpec, StrengthSessionExercise, StrengthSessionSet,
@@ -71,11 +128,11 @@ for activity in activities.list_activities(limit=5, activity_type="strength_trai
     sets = activities.get_sets(activity.activity_id)
     print(activity.name, sets.total_volume_kg, "kg")
 
-print(health.day("2026-09-21").steps)
+print(health.day("2026-10-18").steps)
 
 uploads.log_strength_session(StrengthSessionSpec(
     name="Push A",
-    start_time=datetime(2026, 9, 21, 7, 0, tzinfo=UTC),
+    start_time=datetime(2026, 10, 18, 7, 0, tzinfo=timezone(timedelta(hours=-4))),
     exercises=[StrengthSessionExercise(
         category="BENCH_PRESS",
         exercise_name="BARBELL_BENCH_PRESS",
@@ -84,134 +141,55 @@ uploads.log_strength_session(StrengthSessionSpec(
 ))
 ```
 
-Responses are pydantic models with Garmin's inconsistencies ironed out: weights in kilograms,
-instants as timezone-aware datetimes, snake_case throughout. Garmin's local wall-clock times,
-such as `start_time_local`, stay without a timezone, because Garmin does not say which one. Garmin's untouched payload is
-still there on `raw` when something is not mapped.
+Responses are pydantic models with Garmin's inconsistencies ironed out: kilograms rather than
+grams, timezone-aware instants, snake_case throughout. Garmin's own payload is still on `raw` when
+something is not mapped.
 
-## HTTP service
+## HTTP API
 
-```bash
-garmin serve
-```
+`garmin serve` runs the same API on `127.0.0.1:8765`, with interactive docs at `/docs`. The MCP
+tools are generated from these routes, so the two cannot drift apart. Because it can write to your
+account, the service refuses writes from web pages open in your browser and requests naming any
+host but `localhost`, which defeats DNS rebinding. Binding beyond localhost requires
+`GARMIN_API_KEY`.
 
-Binds to `127.0.0.1:8765`, with interactive docs at `/docs` and the schema at `/openapi.json`.
-39 operations across activities, health, workouts, sessions and the exercise catalogue.
+## Configuration
 
-The service can write to your Garmin account, so it guards who reaches it:
-
-- **Web pages cannot write to it.** Any page open in a browser on this machine can send requests
-  to localhost, so a write that carries an `Origin` header from anywhere but the service itself is
-  refused.
-- **Foreign host names are refused.** A request must name `127.0.0.1` or `localhost`, which defeats
-  DNS rebinding. Add other names, such as a LAN host name, with `GARMIN_API_HOSTS`.
-- **Beyond localhost it needs a key.** Binding anywhere else requires `GARMIN_API_KEY`, and the
-  service refuses to start without it. The key is checked in constant time on every request except
-  the docs and the health check, and the MCP server's own calls carry it.
-
-## MCP server
-
-```bash
-claude mcp add garmin -- uv run --project /path/to/garmin-connect-api garmin mcp
-```
-
-Or, for Claude Desktop, in `claude_desktop_config.json`:
-
-```json
-{
-  "mcpServers": {
-    "garmin": {
-      "command": "uv",
-      "args": ["run", "--project", "/path/to/garmin-connect-api", "garmin", "mcp"]
-    }
-  }
-}
-```
-
-The tools are generated from the HTTP routes, so every endpoint is a tool with the same name and
-description. Four are hand-written because a model wants a different shape from a REST client:
-
-| Tool | What it answers |
+| Variable | Purpose |
 | --- | --- |
-| `garmin_status` | Whether the server can reach the account. Call this first when something fails. |
-| `find_exercise` | Garmin's category and exercise name for an exercise, which every write needs. |
-| `recent_strength_sessions` | Recent strength workouts with their sets and volume, in one call. |
-| `week_summary` | Seven days of training and health together. |
+| `GARMINTOKENS` | Where tokens are stored. Defaults to `~/.garmin-api/default`. |
+| `GARMIN_API_KEY` | Required to bind the HTTP service beyond localhost. |
+| `GARMIN_API_HOSTS` | Extra host names the HTTP service answers to, comma-separated. |
 
-Bulky endpoints are deliberately excluded from the tool list, and remain on the HTTP API: raw
-file downloads and sample-level activity detail are hundreds of kilobytes of numbers that would
-flood a context window.
-The health tools answer with summaries by default, such as minutes in each stress band rather than
-480 three-minute readings, and take a flag when the raw readings are wanted.
-
-## Naming exercises
-
-Garmin identifies every strength exercise by a category and an exercise name, such as
-`BENCH_PRESS` and `BARBELL_BENCH_PRESS`. It rejects anything outside its own catalogue. The
-catalogue ships with this package, so searching it needs neither a network nor a login:
+## Development
 
 ```bash
-garmin exercises "bench press"
-```
-
-Every write validates against it first and answers an unknown name with near misses, rather than
-letting Garmin reply with a bare 400.
-
-## Logging a session
-
-`examples/session.json` is a complete example. To see what would be sent without sending it:
-
-```bash
-garmin encode-session examples/session.json --out session.fit
-```
-
-That file can also be imported by hand on the Garmin Connect website, which is useful if you
-would rather not have anything log in on your behalf. The reverse works too: `garmin decode-fit`
-reads a session out of a FIT file or out of the zip Garmin's "Export Original" hands back.
-
-The file's serial number is derived from the session, so the same session always encodes to the
-same file, which is what Garmin's duplicate check for activities needs. That check is not yet
-verified against a live account for strength sessions; when Garmin reports a repeat, the status
-is `duplicate`.
-
-Weigh-ins behave differently, and this has been checked live. Garmin answers every weight
-upload with "File processed" and never reports a duplicate, but it keeps one entry per identical
-measurement: the same weigh-in sent three times, even as different files, is stored once, so the
-status for those is `processed`. The same moment with different values is stored as a second
-entry.
-
-## Tests
-
-```bash
+git clone https://github.com/happyc0der/garmin-connect-api
+cd garmin-connect-api
+uv venv && uv pip install -e ".[dev]"
 uv run pytest
 ```
 
-164 tests, no network and no account needed. They cover the models against real Garmin payload
-shapes, the FIT codec's round trip, the whole 1,527-entry exercise catalogue against the FIT
-profile, the HTTP routes, the generated MCP tool list, and every tool's output against its own
-advertised schema, which strict MCP clients enforce.
+175 offline tests, needing no network and no account. They cover the models against real Garmin
+response shapes, the FIT codec's round trip, every one of the 1,527 catalogue exercises against
+the FIT profile, the HTTP routes, and every MCP tool's output against its own advertised schema,
+which strict clients enforce.
 
-Against a real account:
+Tests against a real account are opt-in, and the ones that create data need a second opt-in:
 
 ```bash
-GARMIN_LIVE=1 uv run pytest tests/live                     # read only
-GARMIN_LIVE=1 GARMIN_LIVE_WRITE=1 uv run pytest tests/live # creates and deletes real data
+GARMIN_LIVE=1 uv run pytest tests/live                      # read only
+GARMIN_LIVE=1 GARMIN_LIVE_WRITE=1 uv run pytest tests/live  # creates, then deletes
 ```
 
-## How this talks to Garmin, and the caveat
+## Why the unofficial route
 
-Through `python-garminconnect`, which uses the same private endpoints as the Garmin Connect
-website and mobile app. That is a deliberate choice, and the only one available:
-
-- Garmin's official Connect Developer Program is for businesses, has no endpoint that uploads a
-  completed activity, and has been closed to new applicants since spring 2026.
-- The aggregators that wrap it (Terra, Rook, Spike, Thryve) start around $399 a month and are
-  read-only or plans-only.
-
-So this is unsanctioned by Garmin's terms, and the private endpoints can change without notice.
-It is meant for your own account and your own data. Use it gently: no polling loops, no retries
-on a 429.
+Garmin's official Connect Developer Program is for businesses, has no endpoint that uploads a
+completed activity, and was closed to new applicants in 2026. The aggregators that wrap it cost
+hundreds of dollars a month and are read-only or plans-only. So this uses the endpoints Garmin's
+own website uses, gently: no polling, no retries on a rate limit.
 
 ## Licence
 
-MIT.
+MIT. Garmin and Garmin Connect are trademarks of Garmin Ltd., used here only to say what this
+works with.
