@@ -29,23 +29,39 @@ from ..models.workouts import (
 )
 from . import exercises as fx
 
+# Far beyond any activity a watch records: a long GPS ride is a few MB. A
+# small zip can otherwise expand to gigabytes in memory.
+MAX_FIT_BYTES = 32 * 1024 * 1024
+
 
 def _unwrap(data: bytes) -> bytes:
     """Return FIT bytes, unwrapping a single-entry zip if that is what came."""
     if not data:
         raise InvalidRequest("The file is empty.")
     if data[:2] != b"PK":
-        return data
+        return _bounded(data)
     try:
         with zipfile.ZipFile(io.BytesIO(data)) as archive:
-            names = [n for n in archive.namelist() if n.lower().endswith(".fit")]
-            if len(names) != 1:
+            entries = [i for i in archive.infolist() if i.filename.lower().endswith(".fit")]
+            if len(entries) != 1:
                 raise InvalidRequest(
-                    f"Expected exactly one .fit file in the archive, found {len(names)}."
+                    f"Expected exactly one .fit file in the archive, found {len(entries)}."
                 )
-            return archive.read(names[0])
+            entry = entries[0]
+            if entry.file_size > MAX_FIT_BYTES:
+                raise InvalidRequest("The FIT file in the archive is too large to be an activity.")
+            with archive.open(entry) as source:
+                return _bounded(source.read(MAX_FIT_BYTES + 1))
     except zipfile.BadZipFile as exc:
         raise InvalidRequest("The zip archive is damaged.", detail=str(exc)) from exc
+    except RuntimeError as exc:  # an encrypted entry
+        raise InvalidRequest("The zip archive cannot be read.", detail=str(exc)) from exc
+
+
+def _bounded(data: bytes) -> bytes:
+    if len(data) > MAX_FIT_BYTES:
+        raise InvalidRequest("The FIT file is too large to be an activity.")
+    return data
 
 
 def parse_fit(data: bytes) -> FitFile:

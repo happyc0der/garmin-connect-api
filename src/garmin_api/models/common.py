@@ -71,9 +71,29 @@ class ExerciseSpec(WriteSpec):
     @model_validator(mode="before")
     @classmethod
     def _search_result(cls, data: Any) -> Any:
-        # The display name says nothing the category and exercise do not.
-        if isinstance(data, dict) and isinstance(data.get("name"), str):
-            data = {key: value for key, value in data.items() if key != "name"}
+        """Take the display name a find_exercise result carries.
+
+        Beside the variant it adds nothing and is dropped. Alone, it is the
+        only thing saying which variant is meant, so it is looked up; it must
+        never be dropped then, or the generic exercise would be saved.
+        """
+        if not isinstance(data, dict) or not isinstance(data.get("name"), str):
+            return data
+        data = dict(data)
+        name = data.pop("name")
+        if any(data.get(key) for key in EXERCISE_NAME_KEYS):
+            return data
+        from .. import catalogue
+
+        found = catalogue.resolve(name)
+        category = str(data.get("category") or "").upper().strip()
+        if found is None or (category and found.category != category):
+            raise ValueError(
+                f"name {name!r} is not an exercise in category {category or '?'}; "
+                "give exercise_name (find_exercise's 'exercise')"
+            )
+        data.setdefault("category", found.category)
+        data["exercise_name"] = found.exercise
         return data
 
 

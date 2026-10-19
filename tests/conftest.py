@@ -30,6 +30,9 @@ def no_real_tokens(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     tokens = tmp_path / "tokens"
     tokens.mkdir()
     monkeypatch.setenv("GARMINTOKENS", str(tokens))
+    # FastAPI's TestClient names its host "testserver", which the service
+    # rightly does not trust by default; tests allow it as a user would.
+    monkeypatch.setenv("GARMIN_API_HOSTS", "testserver")
     auth.session().reset()
     # Lookups cached for a process must not leak from one test into the next.
     from garmin_api.services import activities, health

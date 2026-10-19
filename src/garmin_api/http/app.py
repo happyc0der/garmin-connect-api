@@ -30,8 +30,10 @@ API_KEY_ENV = "GARMIN_API_KEY"
 # Extra host names to answer to, comma-separated, e.g. a LAN name when bound
 # beyond localhost with a key set.
 HOSTS_ENV = "GARMIN_API_HOSTS"
-# "testserver" is the host name FastAPI's TestClient sends.
-LOCAL_HOSTS = frozenset({"127.0.0.1", "localhost", "::1", "testserver"})
+# Never a name anyone else could make resolve here: "testserver", which
+# FastAPI's TestClient sends, once stood in this list and let a rebound name
+# reach every write. Tests name it through GARMIN_API_HOSTS instead.
+LOCAL_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 OPEN_PATHS = frozenset({"/healthz", "/docs", "/docs/oauth2-redirect", "/redoc", "/openapi.json"})
 
@@ -75,13 +77,19 @@ def refusal(headers: Mapping[str, str], method: str, path: str) -> JSONResponse 
     if host_header and host not in LOCAL_HOSTS | _extra_hosts():
         return JSONResponse(status_code=403, content={"error": "Forbidden host"})
 
+    # A browser says where a request comes from. Another site's page cannot
+    # read the answer to a GET, but every GET still spends the account's
+    # Garmin requests: an image tag on any page could keep it rate limited.
+    if (headers.get("sec-fetch-site") or "").lower() in ("cross-site", "same-site"):
+        return JSONResponse(status_code=403, content={"error": "Cross-site request refused"})
+
     # Same host and port. A Host without a port means the Origin scheme's
     # default port, not whatever port the Origin names.
     default = {"http": 80, "https": 443}.get(site.scheme) if site is not None else None
     expected_port = host_port if host_port is not None else default
     foreign = origin is not None and (origin_at is None or origin_at != (host, expected_port))
-    if foreign and method.upper() not in SAFE_METHODS:
-        return JSONResponse(status_code=403, content={"error": "Cross-origin write refused"})
+    if foreign:
+        return JSONResponse(status_code=403, content={"error": "Cross-origin request refused"})
 
     expected = os.getenv(API_KEY_ENV)
     if expected and path not in OPEN_PATHS:
@@ -175,7 +183,11 @@ def create_app() -> FastAPI:
         escapes the app would be reported as the model's own invalid input.
         """
         try:
-            return await call_next(request)
+            response = await call_next(request)
+            # Nothing here is meant to be framed; the docs page least of all.
+            response.headers["X-Frame-Options"] = "DENY"
+            response.headers["Content-Security-Policy"] = "frame-ancestors 'none'"
+            return response
         except Exception as exc:  # noqa: BLE001 -- the last line of defence
             logger.exception("Unhandled error on %s %s", request.method, request.url.path)
             return JSONResponse(

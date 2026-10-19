@@ -175,6 +175,9 @@ class ActivitySets(ApiModel):
 
     activity_id: int
     sets: list[StrengthSet] = Field(default_factory=list)
+    note: str | None = Field(
+        default=None, description="Set when something about this answer needs saying."
+    )
 
     @property
     def working_sets(self) -> list[StrengthSet]:
