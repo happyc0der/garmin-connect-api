@@ -206,3 +206,98 @@ def test_an_account_timezone_that_cannot_be_read_is_an_error_not_the_machines(
     fake_garmin["responses"]["get_user_timezone"] = None
     with pytest.raises(GarminUnavailable, match="timezone"):
         auth.in_account_time(datetime(2026, 10, 19, 7, 0))
+
+
+# --- The round-four sweep -------------------------------------------------------------
+
+
+def test_an_odd_stats_value_costs_only_its_field(fake_garmin: dict[str, Any]) -> None:
+    from garmin_api.services import health
+
+    fake_garmin["responses"]["get_stats"] = {"totalSteps": 9000, "restingHeartRate": 58.5}
+    summary = health.day("2026-10-15", parts={"stats"})
+    assert (summary.steps, summary.resting_hr) == (9000, None)
+
+
+def test_a_rate_limited_connect_cools_down_instead_of_being_retried(
+    no_real_tokens, monkeypatch
+) -> None:
+    from types import SimpleNamespace
+
+    from garminconnect import GarminConnectTooManyRequestsError
+
+    from garmin_api import auth
+    from garmin_api.errors import RateLimited
+
+    (no_real_tokens / "garmin_tokens.json").write_text("{}")
+    built: list[int] = []
+
+    class ThrottledGarmin:
+        def __init__(self) -> None:
+            built.append(1)
+            self.client = SimpleNamespace(_tokenstore_path=None)
+
+        def login(self, tokenstore: str | None = None) -> None:
+            raise GarminConnectTooManyRequestsError("Rate limit exceeded")
+
+    monkeypatch.setattr(auth, "Garmin", ThrottledGarmin)
+    session = auth.Session()
+    for _ in range(4):
+        with pytest.raises(RateLimited):
+            session.client()
+    assert len(built) == 1
+
+
+def test_a_rate_limit_while_labelling_stops_further_calls(fake_garmin: dict[str, Any]) -> None:
+    from garmin_api.errors import RateLimited
+    from garmin_api.models.workouts import StrengthSessionSpec
+    from garmin_api.services import uploads
+
+    def limited(*_: Any) -> Any:
+        raise RateLimited("Garmin is rate limiting this account.")
+
+    fake_garmin["responses"].update(
+        {
+            "get_activity_types": [
+                {"typeId": 13, "typeKey": "strength_training", "parentTypeId": None}
+            ],
+            "connectapi": [],
+            "upload_activity": {"detailedImportResult": {"successes": [{"internalId": 7}]}},
+            "set_activity_name": limited,
+            "set_activity_description": {},
+        }
+    )
+    spec = StrengthSessionSpec.model_validate(
+        {
+            "name": "Push",
+            "notes": "felt strong",
+            "start_time": "2026-09-21T07:00:00+00:00",
+            "exercises": [{"category": "PUSH_UP", "sets": [{"reps": 5}]}],
+        }
+    )
+    result = uploads.log_strength_session(spec)
+    assert result["status"] == "created"
+    assert "set_activity_description" not in [c[0] for c in fake_garmin["calls"]]
+    assert "rate limiting" in result["note"]
+
+
+def test_a_portless_host_takes_the_requests_own_scheme() -> None:
+    response = TestClient(create_app()).post(
+        "/v1/health/weight",
+        params={"weight": 80},
+        headers={"Host": "localhost", "Origin": "https://localhost"},
+    )
+    assert response.status_code == 403
+
+
+def test_an_unknown_timezone_is_asked_for_again(fake_garmin: dict[str, Any], monkeypatch) -> None:
+    from types import SimpleNamespace
+
+    from garmin_api import auth
+
+    client = SimpleNamespace(_time_zone_loaded=True)
+    monkeypatch.setattr(auth.session(), "_client", client)
+    fake_garmin["responses"]["get_user_timezone"] = None
+    with pytest.raises(GarminUnavailable):
+        auth.account_zone()
+    assert client._time_zone_loaded is False

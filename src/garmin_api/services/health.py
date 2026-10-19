@@ -12,6 +12,8 @@ import logging
 from datetime import date
 from typing import Any
 
+from pydantic import ValidationError
+
 from .. import auth
 from ..errors import GarminApiError, GarminUnavailable, NotAuthenticated, NotFound, RateLimited
 from ..models.common import as_date_str
@@ -23,6 +25,7 @@ from ..models.health import (
     StepsSummary,
     StressSummary,
     WeighIn,
+    stats_fields,
 )
 
 logger = logging.getLogger(__name__)
@@ -168,14 +171,22 @@ def day(
             logger.debug("Part of the day failed, leaving it out: %s", exc)
             failures.append(exc)
 
-    base: dict[str, Any] = {}
+    summary = DaySummary(day=parsed_day)
 
     def read_stats() -> None:
-        base.update(_get("get_stats", day_str) or {})
+        stats = _get("get_stats", day_str) or {}
+        if include_raw:
+            summary.raw = stats
+        # Field by field, each checked as it lands: one odd value, a resting
+        # heart rate of 58.5 say, empties that field rather than the day.
+        for field, value in stats_fields(stats).items():
+            try:
+                setattr(summary, field, value)
+            except ValidationError:
+                logger.debug("Garmin's %s for %s was %r; left out", field, day_str, value)
 
     if "stats" in parts:
         attempt(read_stats)
-    summary = DaySummary.from_stats(parsed_day, base, include_raw=include_raw)
 
     def read_sleep() -> None:
         summary.sleep = sleep(day_str, include_raw=include_raw)

@@ -167,24 +167,27 @@ class DaySummary(ApiModel):
     def from_stats(
         cls, day: date, stats: dict[str, Any], *, include_raw: bool = False
     ) -> DaySummary:
-        return cls(
-            day=day,
-            steps=first(stats, "totalSteps", "steps"),
-            step_goal=first(stats, "dailyStepGoal", "stepGoal"),
-            distance_m=first(stats, "totalDistanceMeters", "distance"),
-            floors_climbed=first(stats, "floorsAscended", "floorsClimbed"),
-            active_calories=first(stats, "activeKilocalories"),
-            total_calories=first(stats, "totalKilocalories"),
-            moderate_intensity_minutes=first(stats, "moderateIntensityMinutes"),
-            vigorous_intensity_minutes=first(stats, "vigorousIntensityMinutes"),
-            resting_hr=first(stats, "restingHeartRate"),
-            min_hr=first(stats, "minHeartRate"),
-            max_hr=first(stats, "maxHeartRate"),
-            average_stress=_reading(first(stats, "averageStressLevel")),
-            body_battery_high=first(stats, "bodyBatteryHighestValue"),
-            body_battery_low=first(stats, "bodyBatteryLowestValue"),
-            raw=stats if include_raw else None,
-        )
+        return cls(day=day, raw=stats if include_raw else None, **stats_fields(stats))
+
+
+def stats_fields(stats: dict[str, Any]) -> dict[str, Any]:
+    """The day summary's fields that Garmin's daily stats fill, by name."""
+    return dict(
+        steps=first(stats, "totalSteps", "steps"),
+        step_goal=first(stats, "dailyStepGoal", "stepGoal"),
+        distance_m=first(stats, "totalDistanceMeters", "distance"),
+        floors_climbed=first(stats, "floorsAscended", "floorsClimbed"),
+        active_calories=first(stats, "activeKilocalories"),
+        total_calories=first(stats, "totalKilocalories"),
+        moderate_intensity_minutes=first(stats, "moderateIntensityMinutes"),
+        vigorous_intensity_minutes=first(stats, "vigorousIntensityMinutes"),
+        resting_hr=first(stats, "restingHeartRate"),
+        min_hr=first(stats, "minHeartRate"),
+        max_hr=first(stats, "maxHeartRate"),
+        average_stress=_reading(first(stats, "averageStressLevel")),
+        body_battery_high=first(stats, "bodyBatteryHighestValue"),
+        body_battery_low=first(stats, "bodyBatteryLowestValue"),
+    )
 
 
 class HrvSummary(ApiModel):

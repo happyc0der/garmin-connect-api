@@ -46,7 +46,9 @@ def _extra_hosts() -> frozenset[str]:
     return frozenset(h.strip().lower() for h in raw.split(",") if h.strip())
 
 
-def refusal(headers: Mapping[str, str], method: str, path: str) -> JSONResponse | None:
+def refusal(
+    headers: Mapping[str, str], method: str, path: str, scheme: str = "http"
+) -> JSONResponse | None:
     """Why a request must be refused, or None. Keeps other web pages, and other
     hosts' names, away from the account.
 
@@ -64,8 +66,8 @@ def refusal(headers: Mapping[str, str], method: str, path: str) -> JSONResponse 
     host_header = (headers.get("host") or "").strip().lower()
     origin = headers.get("origin")
     try:
-        # No scheme for the Host: without a port it takes the Origin's default.
-        host, host_port = _host_and_port(host_header, "")
+        # A Host without a port means this request's own scheme's default.
+        host, host_port = _host_and_port(host_header, scheme)
         site = urlsplit(origin.strip()) if origin is not None else None
         origin_at = (
             _host_and_port(site.netloc.lower(), site.scheme)
@@ -130,7 +132,12 @@ class RequestGuard:
             headers = {
                 k.decode("latin-1").lower(): v.decode("latin-1") for k, v in scope["headers"]
             }
-            refused = refusal(headers, scope.get("method", "GET"), scope.get("path", ""))
+            refused = refusal(
+                headers,
+                scope.get("method", "GET"),
+                scope.get("path", ""),
+                scope.get("scheme", "http"),
+            )
             if refused is not None:
                 await refused(scope, receive, send)
                 return
