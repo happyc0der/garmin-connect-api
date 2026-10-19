@@ -95,7 +95,14 @@ def refusal(
     # served; the Origin scheme's default port is the one to expect.
     default = {"http": 80, "https": 443}.get(site.scheme) if site is not None else None
     expected_port = host_port if host_port is not None else default
-    foreign = origin is not None and (origin_at is None or origin_at != (host, expected_port))
+    foreign = origin is not None and (
+        origin_at is None
+        or origin_at != (host, expected_port)
+        or site is None
+        or site.scheme not in ("http", "https")
+        # A page served over plain http is not this service when it is https.
+        or (scheme == "https" and site.scheme != "https")
+    )
     if foreign:
         return JSONResponse(status_code=403, content={"error": "Cross-origin request refused"})
 

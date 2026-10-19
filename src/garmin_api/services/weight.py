@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from .. import auth
-from ..errors import InvalidRequest
+from ..errors import GarminUnavailable, InvalidRequest
 from ..models.common import as_date_str
 from ..models.health import BodyCompositionSpec, WeighIn
 
@@ -65,11 +65,18 @@ def add_weigh_in(
     else:
         # Garmin files a weigh-in under the local date and time it is given,
         # so an instant in UTC would land on the wrong evening's day; it is
-        # moved into the account's timezone when that is known, and otherwise
-        # sent with the offset it came with.
+        # moved into the account's timezone when that is known. Otherwise a
+        # time given in an offset of its own is sent as given, being surely
+        # the person's local time, but one in UTC says nothing about the day.
         zone = auth.account_zone_or_none()
         if zone is not None:
             moment = moment.astimezone(zone)
+        elif moment.utcoffset() == timedelta(0):
+            raise GarminUnavailable(
+                "Could not read the Garmin account's timezone, so a time in UTC cannot be "
+                "filed under the right day.",
+                detail="Give the time with the local UTC offset, or try again shortly.",
+            )
     return auth.call("add_weigh_in", weight, unit, moment.isoformat())
 
 
