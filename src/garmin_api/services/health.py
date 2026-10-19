@@ -13,7 +13,7 @@ from datetime import date
 from typing import Any
 
 from .. import auth
-from ..errors import NotAuthenticated, NotFound, RateLimited
+from ..errors import GarminApiError, GarminUnavailable, NotAuthenticated, NotFound, RateLimited
 from ..models.common import as_date_str
 from ..models.health import (
     DaySummary,
@@ -155,29 +155,48 @@ def day(
 
     day_str = as_date_str(target)
     parsed_day = date.fromisoformat(day_str)
-    base = (_safe("get_stats", day_str) or {}) if "stats" in parts else {}
+    # Each part is fetched and read on its own: one odd reply leaves that part
+    # empty. If every part fails, though, that is an outage, not a quiet day.
+    failures: list[Exception] = []
+
+    def attempt(fn: Any) -> None:
+        try:
+            fn()
+        except (NotAuthenticated, RateLimited):
+            raise
+        except Exception as exc:  # noqa: BLE001 -- deliberately tolerant
+            logger.debug("Part of the day failed, leaving it out: %s", exc)
+            failures.append(exc)
+
+    base: dict[str, Any] = {}
+
+    def read_stats() -> None:
+        base.update(_get("get_stats", day_str) or {})
+
+    if "stats" in parts:
+        attempt(read_stats)
     summary = DaySummary.from_stats(parsed_day, base, include_raw=include_raw)
 
-    if "sleep" in parts:
-        summary.sleep = _tolerant(sleep, day_str, include_raw=include_raw)
+    def read_sleep() -> None:
+        summary.sleep = sleep(day_str, include_raw=include_raw)
 
-    if "hrv" in parts:
-        hrv_payload = _tolerant(hrv, day_str) or {}
-        hrv_part = hrv_payload.get("hrvSummary") if isinstance(hrv_payload, dict) else None
-        if isinstance(hrv_part, dict):
-            summary.hrv_last_night_avg = hrv_part.get("lastNightAvg")
-            summary.hrv_status = hrv_part.get("status")
+    def read_hrv() -> None:
+        payload = hrv(day_str) or {}
+        part = payload.get("hrvSummary") if isinstance(payload, dict) else None
+        if isinstance(part, dict):
+            summary.hrv_last_night_avg = part.get("lastNightAvg")
+            summary.hrv_status = part.get("status")
 
-    if "readiness" in parts:
-        readiness = _tolerant(training_readiness, day_str)
+    def read_readiness() -> None:
+        readiness = training_readiness(day_str)
         # A list of snapshots, or, on some accounts, a single snapshot object.
         snapshots = readiness if isinstance(readiness, list) else [readiness] if readiness else []
         morning = morning_readiness(snapshots)
         if morning is not None:
             summary.training_readiness = morning.get("score")
 
-    if "weight" in parts:
-        weigh_ins = _safe("get_daily_weigh_ins", day_str) or {}
+    def read_weight() -> None:
+        weigh_ins = _get("get_daily_weigh_ins", day_str) or {}
         rows = weigh_ins.get("dateWeightList") if isinstance(weigh_ins, dict) else None
         if rows:
             # The day's last weigh-in, as the weight trend reports it; nothing
@@ -185,6 +204,22 @@ def day(
             latest = max(rows, key=lambda r: r.get("timestampGMT") or r.get("date") or 0)
             summary.weight = WeighIn.from_garmin(latest, include_raw=include_raw)
 
+    for name, reader in (
+        ("sleep", read_sleep),
+        ("hrv", read_hrv),
+        ("readiness", read_readiness),
+        ("weight", read_weight),
+    ):
+        if name in parts:
+            attempt(reader)
+
+    if parts and len(failures) == len(parts):
+        first = failures[0]
+        if isinstance(first, GarminApiError):
+            raise first
+        raise GarminUnavailable(
+            "Nothing for the day could be read from Garmin.", detail=str(first)
+        ) from first
     return summary
 
 

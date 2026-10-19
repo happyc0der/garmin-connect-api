@@ -97,6 +97,9 @@ def decode_strength_session(data: bytes, *, name: str = "Strength Training") -> 
         raise InvalidRequest("The FIT file holds values out of range.", detail=problems) from exc
 
 
+MAX_REST_S = 86400.0  # what a session's rest may be
+
+
 def _decode(data: bytes, name: str) -> StrengthSessionSpec:
     """Decode FIT bytes into a strength session.
 
@@ -133,10 +136,11 @@ def _decode(data: bytes, name: str) -> StrengthSessionSpec:
         value = set_type.value if hasattr(set_type, "value") else set_type
 
         if value == SetType.REST.value:
-            # A rest belongs to the set before it.
+            # A rest belongs to the set before it; two in a row add up.
             duration = field_value(message, "duration")
             if last_working is not None and duration is not None:
-                last_working.rest_s = float(duration)
+                before = last_working.rest_s if not awaiting_rest else 0.0
+                last_working.rest_s = min(float(duration) + (before or 0.0), MAX_REST_S)
             awaiting_rest = False
             continue
 
@@ -149,10 +153,11 @@ def _decode(data: bytes, name: str) -> StrengthSessionSpec:
         if last_working is not None and awaiting_rest:
             # No rest message: the time between the sets, if the file says, or
             # none. Not an unrecorded rest, which re-encoding would fill in.
+            # Measured from where the set ended, as the file records it; both
+            # ends are whole seconds, so there is no rounding to mistake for
+            # a rest. A gap of more than a day is capped at what a rest can be.
             gap = (starts - last_end) / 1000 if starts is not None and last_end is not None else 0
-            # FIT keeps start times to the second and durations to the
-            # millisecond, so a gap under a second is rounding, not a rest.
-            last_working.rest_s = round(gap, 3) if gap >= 1 else 0.0
+            last_working.rest_s = min(round(gap, 3), MAX_REST_S) if gap >= 1 else 0.0
 
         # A set the watch could not identify is kept, as UNKNOWN, rather than
         # dropped: dropping it lost the set and gave its rest to the one before.
@@ -172,8 +177,11 @@ def _decode(data: bytes, name: str) -> StrengthSessionSpec:
         )
         last_working = entry
         awaiting_rest = True
+        ended = field_value(message, "timestamp")
         last_end = (
-            starts + entry.duration_s * 1000
+            float(ended)
+            if ended is not None
+            else starts + entry.duration_s * 1000
             if starts is not None and entry.duration_s is not None
             else None
         )
