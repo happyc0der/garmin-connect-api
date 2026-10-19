@@ -81,6 +81,15 @@ def log_strength_session(
         result = upload_file(target)
 
     activity_id = result.get("activity_id")
+    if activity_id is None and result.get("status") in ("accepted", "processed"):
+        # Garmin often accepts an activity file and processes it afterwards,
+        # answering with neither a success nor a failure. Found live: the
+        # activity appeared moments later. The session's own start time is
+        # known exactly, so the new activity is found by it.
+        activity_id = find_uploaded_session(spec)
+        if activity_id is not None:
+            result["status"] = "created"
+            result["activity_id"] = activity_id
     if rename and activity_id:
         from . import activities
 
@@ -93,6 +102,43 @@ def log_strength_session(
 
     result["sets_uploaded"] = spec.total_sets
     return result
+
+
+# How long to wait for Garmin to finish processing an accepted upload.
+FIND_ATTEMPTS = 6
+FIND_INTERVAL_S = 2.0
+
+
+def find_uploaded_session(
+    spec: StrengthSessionSpec, *, attempts: int | None = None, interval_s: float | None = None
+) -> int | None:
+    """The id of the strength activity that starts when ``spec`` does, if any.
+
+    Matches on the start instant to the second, which the encoder writes
+    exactly, so an unrelated workout the same day is never mistaken for it.
+    """
+    import time
+    from datetime import timedelta
+
+    from . import activities
+
+    # Read at call time, not bound as defaults, so the settings can be changed.
+    attempts = FIND_ATTEMPTS if attempts is None else attempts
+    interval_s = FIND_INTERVAL_S if interval_s is None else interval_s
+    start = spec.start_time
+    for attempt in range(attempts):
+        rows = activities.list_activities(
+            activity_type=activities.STRENGTH,
+            start_date=(start - timedelta(days=1)).date(),
+            end_date=(start + timedelta(days=1)).date(),
+            limit=50,
+        )
+        for row in rows:
+            if row.start_time and abs((row.start_time - start).total_seconds()) <= 1:
+                return row.activity_id
+        if attempt < attempts - 1:
+            time.sleep(interval_s)
+    return None
 
 
 def _interpret_upload(response: Any) -> dict[str, Any]:
@@ -141,4 +187,12 @@ def _interpret_upload(response: Any) -> dict[str, Any]:
             "raw": payload,
         }
 
+    if result.get("uploadId") or result.get("uploadUuid") or result == {}:
+        # Accepted for processing: no success or failure yet, and no id.
+        return {
+            "status": "accepted",
+            "activity_id": None,
+            "upload_id": result.get("uploadId"),
+            "raw": payload,
+        }
     return {"status": "unknown", "raw": payload}

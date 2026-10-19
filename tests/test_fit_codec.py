@@ -148,3 +148,25 @@ def test_different_sessions_get_different_serials(sample_session: StrengthSessio
     changed = sample_session.model_copy(update={"name": "Push B"})
     assert session_serial(changed) != session_serial(sample_session)
     assert 0 < session_serial(sample_session) < 2**31
+
+
+def test_the_file_carries_records_that_date_it(sample_session: StrengthSessionSpec) -> None:
+    """The FIT spec requires records in an activity; without them Strava used the upload time."""
+    from fit_tool.fit_file import FitFile
+    from fit_tool.profile.messages.record_message import RecordMessage
+
+    fit = FitFile.from_bytes(encode_strength_session(sample_session))
+    stamps = [r.message.timestamp for r in fit.records if isinstance(r.message, RecordMessage)]
+    assert stamps, "at least one record"
+    assert stamps[0] == round(sample_session.start_time.timestamp() * 1000), (
+        "first record is the start"
+    )
+    assert stamps == sorted(stamps)
+    # Sets: 4 working + 4 rests (the last has a rest of 90s too) + one closing record.
+    assert (
+        len(stamps)
+        == sum(
+            1 + (1 if (s.rest_s or 0) > 0 else 0) for e in sample_session.exercises for s in e.sets
+        )
+        + 1
+    )

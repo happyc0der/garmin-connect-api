@@ -550,3 +550,64 @@ def test_an_upload_with_no_activity_id_is_processed_not_created(
     )
     assert result["status"] == "processed"
     assert result["activity_id"] is None
+
+
+class TestAcceptedUploads:
+    """Garmin often accepts an activity and processes it afterwards.
+
+    Found live on 19 Oct 2026: the reply named neither a success nor a
+    failure, so the session was neither renamed nor given an id, though the
+    activity appeared seconds later with every set intact.
+    """
+
+    TYPES = [
+        {"typeId": 17, "typeKey": "all", "parentTypeId": None},
+        {"typeId": 29, "typeKey": "fitness_equipment", "parentTypeId": 17},
+        {"typeId": 13, "typeKey": "strength_training", "parentTypeId": 29},
+    ]
+    ACCEPTED = {"detailedImportResult": {"uploadId": 991, "successes": [], "failures": []}}
+
+    @pytest.fixture(autouse=True)
+    def quick(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(uploads, "FIND_INTERVAL_S", 0.0)
+        monkeypatch.setattr(activities, "_types_cache", None)
+
+    def test_the_new_activity_is_found_by_its_start_and_renamed(
+        self, fake_garmin: dict[str, Any], sample_session
+    ) -> None:
+        start = sample_session.start_time.strftime("%Y-%m-%d %H:%M:%S")
+        renamed: list[Any] = []
+        fake_garmin["responses"].update(
+            {
+                "upload_activity": self.ACCEPTED,
+                "get_activity_types": self.TYPES,
+                "connectapi": [
+                    {
+                        "activityId": 5,
+                        "activityType": {"typeKey": "strength_training"},
+                        "startTimeGMT": "2026-09-21 18:00:00",
+                    },
+                    {
+                        "activityId": 6,
+                        "activityType": {"typeKey": "strength_training"},
+                        "startTimeGMT": start,
+                    },
+                ],
+                "set_activity_name": lambda *a: renamed.append(a) or {},
+            }
+        )
+        result = uploads.log_strength_session(sample_session)
+        assert result["status"] == "created"
+        assert result["activity_id"] == 6, "matched on the start instant, not the first row"
+        assert renamed == [("6", "Push A")]
+
+    def test_still_processing_is_reported_as_accepted(
+        self, fake_garmin: dict[str, Any], sample_session
+    ) -> None:
+        fake_garmin["responses"].update(
+            {"upload_activity": self.ACCEPTED, "get_activity_types": self.TYPES, "connectapi": []}
+        )
+        result = uploads.log_strength_session(sample_session)
+        assert result["status"] == "accepted"
+        assert result["activity_id"] is None
+        assert result["upload_id"] == 991

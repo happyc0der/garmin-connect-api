@@ -83,19 +83,23 @@ def test_log_a_strength_session_and_delete_it() -> None:
         ],
     )
 
-    result = uploads.log_strength_session(spec)
-    assert result["status"] in {"created", "duplicate"}
-    activity_id = result["activity_id"]
-    assert activity_id, result
-
+    activity_id: int | None = None
     try:
-        # Garmin processes an upload asynchronously, so the sets may lag a
-        # moment behind the activity appearing.
+        result = uploads.log_strength_session(spec)
+        activity_id = result["activity_id"]
+        assert result["status"] in {"created", "duplicate"}, result
+        assert activity_id, result
+        assert result.get("name") == spec.name, "renamed after upload"
+
         found = activities.get_sets(activity_id)
         assert [s.reps for s in found.sets] == [10, 8]
+        assert [s.weight_kg for s in found.sets] == [60.0, 65.0]
         assert found.total_volume_kg == pytest.approx(10 * 60 + 8 * 65, abs=1)
     finally:
-        activities.delete(activity_id)
+        # Clean up even when an assertion fails: find it by its start time.
+        activity_id = activity_id or uploads.find_uploaded_session(spec)
+        if activity_id:
+            activities.delete(activity_id)
 
 
 def test_record_and_delete_a_body_composition_weigh_in() -> None:

@@ -2,8 +2,13 @@
 
 The message sequence Garmin expects, in order:
 
-    file_id -> file_creator -> event(start) -> [set, ...] -> lap -> session
-             -> event(stop) -> activity
+    file_id -> file_creator -> event(start) -> [record, set, ...] -> record
+             -> lap -> session -> event(stop) -> activity
+
+Records are timestamp-only samples at each set's start and at the end. The FIT
+specification requires at least one in an activity file; Garmin accepted a
+file without them, but Strava, receiving it from Garmin, then dated the session
+at the moment it arrived rather than when it happened.
 
 The sets are the point. Each carries the exercise (category plus optional
 variant), the repetitions, the weight and how long it took. Garmin Connect
@@ -24,6 +29,7 @@ from fit_tool.profile.messages.event_message import EventMessage
 from fit_tool.profile.messages.file_creator_message import FileCreatorMessage
 from fit_tool.profile.messages.file_id_message import FileIdMessage
 from fit_tool.profile.messages.lap_message import LapMessage
+from fit_tool.profile.messages.record_message import RecordMessage
 from fit_tool.profile.messages.session_message import SessionMessage
 from fit_tool.profile.messages.set_message import SetMessage
 from fit_tool.profile.profile_type import (
@@ -69,6 +75,13 @@ def _fit_local_seconds(moment: datetime) -> int:
         moment = moment.replace(tzinfo=UTC)
     offset = moment.utcoffset() or timedelta(0)
     return int(moment.timestamp() - FIT_EPOCH_OFFSET + offset.total_seconds())
+
+
+def _record(moment: datetime) -> RecordMessage:
+    """A timestamp-only sample, which places the activity in time."""
+    record = RecordMessage()
+    record.timestamp = _ms(moment)
+    return record
 
 
 def session_serial(spec: StrengthSessionSpec) -> int:
@@ -127,6 +140,7 @@ def encode_strength_session(spec: StrengthSessionSpec, *, serial: int | None = N
             if duration is None:
                 duration = max(reps * SECONDS_PER_REP, 1.0)
 
+            builder.add(_record(cursor))
             working = SetMessage()
             working.message_index = message_index
             working.set_type = SetType.ACTIVE
@@ -152,6 +166,7 @@ def encode_strength_session(spec: StrengthSessionSpec, *, serial: int | None = N
                 entry.rest_s if entry.rest_s is not None else (0.0 if is_final else DEFAULT_REST_S)
             )
             if rest_s > 0:
+                builder.add(_record(cursor))
                 rest = SetMessage()
                 rest.message_index = message_index
                 rest.set_type = SetType.REST
@@ -163,6 +178,7 @@ def encode_strength_session(spec: StrengthSessionSpec, *, serial: int | None = N
                 cursor += timedelta(seconds=rest_s)
 
     elapsed = (cursor - start).total_seconds()
+    builder.add(_record(cursor))
 
     lap = LapMessage()
     lap.timestamp = _ms(cursor)
