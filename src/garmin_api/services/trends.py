@@ -30,13 +30,14 @@ MAX_DAYS = 731
 
 # The longest range, in days, each endpoint answers in one request, found live
 # on 19 Oct 2026: stress and body battery refuse more than 28 days ("difference
-# in days ... cannot be more than 28"), HRV more than 366 days apart. Longer
-# ranges are fetched in windows; steps are already split by the library.
+# in days ... cannot be more than 28"), HRV more than 366 days apart; readiness
+# accepts at least 367 days and refuses two years. Longer ranges are fetched in
+# windows; steps are already split by the library.
 WINDOW_DAYS = {
     "get_daily_stress_stats": 28,
     "get_daily_body_battery_stats": 28,
     "get_hrv_data_range": 365,
-    "get_training_readiness_range": 28,
+    "get_training_readiness_range": 365,
     # The library documents about a year per request for resting heart rate.
     "get_rhr_daily": 365,
 }

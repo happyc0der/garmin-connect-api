@@ -7,7 +7,7 @@ authors:
 repository-code: "https://github.com/happyc0der/garmin-connect-api"
 url: "https://github.com/happyc0der/garmin-connect-api"
 license: MIT
-version: 0.2.5
+version: 0.2.6
 date-released: 2026-10-19
 keywords:
   - Garmin Connect
