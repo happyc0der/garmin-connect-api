@@ -487,12 +487,10 @@ def account_zone_or_none() -> Any:
         return None
     try:
         return ZoneInfo(name)
-    except ZoneInfoNotFoundError as exc:
-        raise GarminUnavailable(
-            f"The account's timezone, {name}, is not in this machine's timezone database.",
-            detail="Install the tzdata package, or give times with their UTC offset.",
-        ) from exc
-    except (ValueError, OSError):  # a malformed name, or a directory such as "America"
+    except (ZoneInfoNotFoundError, ValueError, OSError):
+        # tzdata ships with this package, so any real zone loads; a name that
+        # does not ("America", say: a directory) is unusable, whichever of
+        # these errors this Python version raises for it.
         logger.debug("Garmin gave an unusable timezone: %r", name)
         return None
 
