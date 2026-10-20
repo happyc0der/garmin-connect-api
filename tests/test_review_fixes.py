@@ -228,7 +228,7 @@ def test_generated_mcp_tools_work_when_a_key_is_set(monkeypatch) -> None:
     from garmin_api.mcp import create_mcp
 
     monkeypatch.setenv("GARMIN_API_KEY", "secret")
-    result = asyncio.run(create_mcp().call_tool("search_exercises", {"q": "row", "limit": 1}))
+    result = asyncio.run(create_mcp().call_tool("match_exercise", {"name": "Barbell Row"}))
     assert result.structured_content
 
 
