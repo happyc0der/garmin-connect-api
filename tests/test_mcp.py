@@ -65,6 +65,22 @@ def test_status_tool_works_without_tokens() -> None:
     assert "garmin login" in (payload.get("hint") or "")
 
 
+def test_the_handshake_names_this_packages_version() -> None:
+    """Left unset, FastMCP reports its own version, which directories then show."""
+    import asyncio
+
+    from fastmcp import Client
+
+    from garmin_api import __version__
+
+    async def handshake() -> object:
+        async with Client(create_mcp()) as client:
+            return client.server_info
+
+    info = asyncio.run(handshake())
+    assert (info.name, info.version) == ("garmin", __version__)  # type: ignore[attr-defined]
+
+
 def test_instructions_warn_about_rate_limits() -> None:
     mcp = create_mcp()
     assert "rate limiting" in (mcp.instructions or "")

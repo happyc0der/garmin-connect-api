@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.1 (2026-10-19)
+
+### Fixed
+
+- **The MCP handshake reported FastMCP's version** (4.1.1 with the dependencies 0.3.0 resolved
+  to) instead of this package's, so a client or directory reading the server's version showed
+  the wrong one. It now reports the package version.
+
 ## 0.3.0 (2026-10-19)
 
 The MCP tools, rewritten for the model that reads them, against Glama's tool definition quality

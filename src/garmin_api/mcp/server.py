@@ -144,6 +144,8 @@ def create_mcp() -> FastMCP:
         httpx_client_kwargs=client_kwargs,
         mcp_component_fn=_annotate,
         name="garmin",
+        # Left out, FastMCP reports its own version in the handshake.
+        version=__version__,
         instructions=INSTRUCTIONS,
         route_maps=[
             # The exercise catalogue is reference data that never changes
