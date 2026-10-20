@@ -412,18 +412,35 @@ class BodyCompositionSpec(WriteSpec):
             "account's own timezone."
         )
     )
-    weight_kg: float = Field(gt=0, le=650)
-    percent_fat: float | None = Field(default=None, ge=0, le=100)
-    percent_hydration: float | None = Field(default=None, ge=0, le=100)
-    visceral_fat_mass_kg: float | None = Field(default=None, ge=0, le=650)
-    bone_mass_kg: float | None = Field(default=None, ge=0, le=650)
-    muscle_mass_kg: float | None = Field(default=None, ge=0, le=650)
-    basal_met_kcal: float | None = Field(default=None, ge=0, le=16000)
-    active_met_kcal: float | None = Field(default=None, ge=0, le=16000)
-    physique_rating: int | None = Field(default=None, ge=1, le=9)
-    metabolic_age: int | None = Field(default=None, ge=1, le=120)
-    visceral_fat_rating: int | None = Field(default=None, ge=1, le=59)
-    bmi: float | None = Field(default=None, ge=0, le=200)
+    weight_kg: float = Field(gt=0, le=650, description="Body weight, kg.")
+    percent_fat: float | None = Field(default=None, ge=0, le=100, description="Body fat, %.")
+    percent_hydration: float | None = Field(
+        default=None, ge=0, le=100, description="Body water, %."
+    )
+    visceral_fat_mass_kg: float | None = Field(
+        default=None, ge=0, le=650, description="Visceral fat mass, kg."
+    )
+    bone_mass_kg: float | None = Field(default=None, ge=0, le=650, description="Bone mass, kg.")
+    muscle_mass_kg: float | None = Field(
+        default=None,
+        ge=0,
+        le=650,
+        description="Skeletal muscle mass, kg: Garmin shows this field under that name.",
+    )
+    basal_met_kcal: float | None = Field(
+        default=None, ge=0, le=16000, description="Basal metabolic rate, kcal a day."
+    )
+    active_met_kcal: float | None = Field(
+        default=None, ge=0, le=16000, description="Active metabolic rate, kcal a day."
+    )
+    physique_rating: int | None = Field(
+        default=None, ge=1, le=9, description="The scale's physique rating, 1 to 9."
+    )
+    metabolic_age: int | None = Field(default=None, ge=1, le=120, description="In years.")
+    visceral_fat_rating: int | None = Field(
+        default=None, ge=1, le=59, description="The scale's visceral fat rating, 1 to 59."
+    )
+    bmi: float | None = Field(default=None, ge=0, le=200, description="Body mass index.")
 
     @field_validator("timestamp")
     @classmethod

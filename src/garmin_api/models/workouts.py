@@ -96,9 +96,11 @@ class StrengthExerciseSpec(ExerciseSpec):
             "Empty means the generic one."
         ),
     )
-    sets: int = Field(default=1, ge=1, le=99)
-    reps: int = Field(default=10, ge=1, le=999)
-    weight_kg: float | None = Field(default=None, ge=0, le=1000)
+    sets: int = Field(default=1, ge=1, le=99, description="How many sets.")
+    reps: int = Field(default=10, ge=1, le=999, description="Reps in each set.")
+    weight_kg: float | None = Field(
+        default=None, ge=0, le=1000, description="Weight to lift, kg. Left out, none is set."
+    )
     rest_s: int = Field(default=90, ge=0, le=3600, description="Rest after each set.")
 
     @field_validator("category", "exercise_name")
@@ -117,9 +119,13 @@ class StrengthExerciseSpec(ExerciseSpec):
 class StrengthWorkoutSpec(WriteSpec):
     """A strength workout to put on the Garmin calendar."""
 
-    name: str = Field(min_length=1, max_length=80)
-    exercises: list[StrengthExerciseSpec] = Field(min_length=1)
-    description: str | None = Field(default=None, max_length=1024)
+    name: str = Field(min_length=1, max_length=80, description="The workout's title.")
+    exercises: list[StrengthExerciseSpec] = Field(
+        min_length=1, description="The exercises in order, each a block of sets."
+    )
+    description: str | None = Field(
+        default=None, max_length=1024, description="Notes shown with the workout."
+    )
     schedule_date: date | None = Field(
         default=None, description="If set, the workout is scheduled on this date after creation."
     )
@@ -128,8 +134,10 @@ class StrengthWorkoutSpec(WriteSpec):
 class StrengthSessionSet(WriteSpec):
     """One completed set."""
 
-    reps: int | None = Field(default=None, ge=0, le=999)
-    weight_kg: float | None = Field(default=None, ge=0, le=1000)
+    reps: int | None = Field(default=None, ge=0, le=999, description="Reps done.")
+    weight_kg: float | None = Field(
+        default=None, ge=0, le=1000, description="Weight lifted, kg. Left out for bodyweight."
+    )
     # A day at most: well past any real set, and inside the FIT field's range.
     duration_s: float | None = Field(
         default=None,
@@ -146,7 +154,9 @@ class StrengthSessionSet(WriteSpec):
 
 
 class StrengthSessionExercise(ExerciseSpec):
-    category: str
+    """One exercise in a completed session, with every set done."""
+
+    category: str = Field(description='Garmin exercise category, e.g. "BENCH_PRESS".')
     exercise_name: str = Field(
         default="",
         validation_alias=AliasChoices(*EXERCISE_NAME_KEYS),
@@ -155,7 +165,7 @@ class StrengthSessionExercise(ExerciseSpec):
             "Left empty, the category's generic one."
         ),
     )
-    sets: list[StrengthSessionSet] = Field(min_length=1)
+    sets: list[StrengthSessionSet] = Field(min_length=1, description="Each set, in order.")
 
     @field_validator("category", "exercise_name")
     @classmethod
@@ -179,14 +189,20 @@ class StrengthSessionSpec(WriteSpec):
     as a Strength Training activity.
     """
 
-    name: str = Field(default="Strength Training", max_length=80)
+    name: str = Field(
+        default="Strength Training",
+        max_length=80,
+        description="The activity's title in Garmin Connect.",
+    )
     start_time: datetime = Field(
         description=(
             "When the session started. Without an offset, it is taken as local time in the "
             "Garmin account's own timezone."
         )
     )
-    exercises: list[StrengthSessionExercise] = Field(min_length=1)
+    exercises: list[StrengthSessionExercise] = Field(
+        min_length=1, description="The exercises in the order done, each with its sets."
+    )
     notes: str | None = Field(
         default=None, max_length=1024, description="Saved as the activity's description."
     )
@@ -234,13 +250,21 @@ class Target(WriteSpec):
     be given either way round; it is put in order here.
     """
 
-    pace_per_km: tuple[str, str] | None = None
-    pace_per_mile: tuple[str, str] | None = None
-    speed_kph: tuple[float, float] | None = None
-    heart_rate_zone: int | None = Field(default=None, ge=1, le=5)
-    heart_rate_bpm: tuple[int, int] | None = None
-    power_zone: int | None = Field(default=None, ge=1, le=7)
-    power_watts: tuple[int, int] | None = None
+    pace_per_km: tuple[str, str] | None = Field(
+        default=None, description='A pace range per km, as "m:ss": ["5:30", "5:00"].'
+    )
+    pace_per_mile: tuple[str, str] | None = Field(
+        default=None, description='A pace range per mile, as "m:ss": ["9:00", "8:30"].'
+    )
+    speed_kph: tuple[float, float] | None = Field(default=None, description="A speed range, km/h.")
+    heart_rate_zone: int | None = Field(
+        default=None, ge=1, le=5, description="A heart rate zone, 1 to 5."
+    )
+    heart_rate_bpm: tuple[int, int] | None = Field(
+        default=None, description="A heart rate range, beats a minute."
+    )
+    power_zone: int | None = Field(default=None, ge=1, le=7, description="A power zone, 1 to 7.")
+    power_watts: tuple[int, int] | None = Field(default=None, description="A power range, watts.")
     cadence: tuple[int, int] | None = Field(
         default=None, description="Steps or revolutions a minute."
     )
@@ -278,14 +302,27 @@ def _seconds(text: str) -> int:
 class EnduranceStep(WriteSpec):
     """One step: ends after a time, a distance, or a press of the lap button."""
 
-    kind: StepKind = "interval"
-    duration_s: float | None = Field(default=None, gt=0, le=86400)
-    distance: float | None = Field(default=None, gt=0, le=1_000_000)
-    distance_unit: Literal["m", "km", "mi", "yd"] = "m"
-    lap_button: bool = False
-    target: Target | None = None
-    stroke: Literal["any", "back", "breast", "drill", "fly", "free", "im", "mixed"] | None = None
-    equipment: Literal["fins", "kickboard", "paddles", "pull_buoy", "snorkel"] | None = None
+    kind: StepKind = Field(
+        default="interval",
+        description="The step's type. In a swim, a rest is a fixed rest on the wall.",
+    )
+    duration_s: float | None = Field(
+        default=None, gt=0, le=86400, description="Ends the step after this many seconds."
+    )
+    distance: float | None = Field(
+        default=None, gt=0, le=1_000_000, description="Ends the step after this distance."
+    )
+    distance_unit: Literal["m", "km", "mi", "yd"] = Field(
+        default="m", description="The distance's unit."
+    )
+    lap_button: bool = Field(default=False, description="True ends the step on a lap press.")
+    target: Target | None = Field(default=None, description="What to hold; none if left out.")
+    stroke: Literal["any", "back", "breast", "drill", "fly", "free", "im", "mixed"] | None = Field(
+        default=None, description="Swims: the stroke for this step."
+    )
+    equipment: Literal["fins", "kickboard", "paddles", "pull_buoy", "snorkel"] | None = Field(
+        default=None, description="Swims: equipment used for this step."
+    )
     note: str | None = Field(default=None, max_length=200, description="Shown on the watch.")
 
     @model_validator(mode="after")
@@ -301,8 +338,10 @@ class EnduranceStep(WriteSpec):
 
 
 class EnduranceRepeat(WriteSpec):
-    repeat: int = Field(ge=2, le=99)
-    steps: list[EnduranceStep] = Field(min_length=1)
+    """Steps run several times over, such as 8 x (100 m hard, 20 s rest)."""
+
+    repeat: int = Field(ge=2, le=99, description="How many times to run the steps.")
+    steps: list[EnduranceStep] = Field(min_length=1, description="The steps to repeat, in order.")
 
 
 def _step_or_repeat(value: Any) -> str:
@@ -321,13 +360,25 @@ StepOrRepeat = Annotated[
 class EnduranceWorkoutSpec(WriteSpec):
     """A run, ride or pool swim to put on the Garmin calendar."""
 
-    sport: Literal["running", "cycling", "swimming"]
-    name: str = Field(min_length=1, max_length=80)
-    steps: list[StepOrRepeat] = Field(min_length=1)
-    description: str | None = Field(default=None, max_length=1024)
+    sport: Literal["running", "cycling", "swimming"] = Field(
+        description="running, cycling, or swimming in a pool."
+    )
+    name: str = Field(min_length=1, max_length=80, description="The workout's title.")
+    steps: list[StepOrRepeat] = Field(
+        min_length=1,
+        description="Steps in order; a repeat holds steps to run several times.",
+    )
+    description: str | None = Field(
+        default=None, max_length=1024, description="Notes shown with the workout."
+    )
     pool_length: float | None = Field(default=None, gt=0, le=100, description="Swims only.")
-    pool_unit: Literal["m", "yd"] = "m"
-    schedule_date: date | None = None
+    pool_unit: Literal["m", "yd"] = Field(
+        default="m", description="The pool length's unit, m or yd; swims only."
+    )
+    schedule_date: date | None = Field(
+        default=None,
+        description="If set, the workout is scheduled on this date after creation.",
+    )
 
     @model_validator(mode="after")
     def _swim_rules(self) -> EnduranceWorkoutSpec:

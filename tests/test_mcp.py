@@ -19,7 +19,6 @@ EXPECTED = {
     "schedule_workout",
     "push_workout_to_device",
     "log_strength_session",
-    "search_exercises",
     "add_weigh_in",
     "garmin_status",
     "find_exercise",
@@ -103,13 +102,43 @@ def test_reading_tools_are_marked_read_only(tools: dict[str, object]) -> None:
 def test_only_garmin_calls_are_open_world(tools: dict[str, object]) -> None:
     """The catalogue and status answer offline; everything else reaches Garmin."""
     local = {name for name, tool in tools.items() if tool.annotations.open_world_hint is False}  # type: ignore[attr-defined]
-    assert local == {
-        "healthz",
-        "garmin_status",
-        "find_exercise",
-        "search_exercises",
-        "match_exercise",
-    }
+    assert local == {"garmin_status", "find_exercise", "match_exercise"}
+
+
+def test_duplicate_tools_stay_off_the_mcp_surface(tools: dict[str, object]) -> None:
+    """Two names for one thing only make a model choose; they stay on the HTTP API."""
+    assert not {"search_exercises", "healthz", "get_last_activity"} & set(tools)
+
+
+def _undescribed(schema: object, root: dict, path: str, seen: frozenset[str] = frozenset()):
+    """Properties without a description, however deeply nested."""
+    if not isinstance(schema, dict):
+        return
+    if "$ref" in schema:
+        ref = schema["$ref"]
+        if ref not in seen:
+            node = root
+            for part in ref.removeprefix("#/").split("/"):
+                node = node[part]
+            yield from _undescribed(node, root, path, seen | {ref})
+        return
+    for name, prop in schema.get("properties", {}).items():
+        if not prop.get("description"):
+            yield f"{path}.{name}"
+        yield from _undescribed(prop, root, f"{path}.{name}", seen)
+    yield from _undescribed(schema.get("items"), root, f"{path}[]", seen)
+    for option in schema.get("anyOf", []) + schema.get("oneOf", []):
+        yield from _undescribed(option, root, path, seen)
+
+
+def test_every_tool_argument_is_described(tools: dict[str, object]) -> None:
+    """A model fills in what it understands, nested fields included; Glama grades the same."""
+    undescribed = [
+        field
+        for name, tool in tools.items()
+        for field in _undescribed(tool.parameters or {}, tool.parameters or {}, name)  # type: ignore[attr-defined]
+    ]
+    assert undescribed == []
 
 
 def test_every_tool_has_a_readable_title(tools: dict[str, object]) -> None:
@@ -119,4 +148,4 @@ def test_every_tool_has_a_readable_title(tools: dict[str, object]) -> None:
     assert titles["delete_activity"] == "Delete activity"
     assert titles["get_hrv"] == "Get HRV"
     assert titles["add_weigh_in"] == "Add weigh-in"
-    assert titles["healthz"] == "Service health"
+    assert titles["garmin_status"] == "Garmin status"

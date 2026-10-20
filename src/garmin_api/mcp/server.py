@@ -50,9 +50,9 @@ can lock the account out for a day or more.
 """.strip()
 
 
-# Paths answered entirely from the bundled catalogue or the service itself:
-# they never reach Garmin, so they are not "open world".
-LOCAL_PATHS = ("/healthz", "/v1/exercises/")
+# Paths answered entirely from the bundled catalogue: they never reach Garmin,
+# so they are not "open world".
+LOCAL_PATHS = ("/v1/exercises/",)
 # Overwrites that do something different when repeated: deleting set 2 again
 # deletes what was set 3.
 NOT_IDEMPOTENT = frozenset({"edit_activity_sets"})
@@ -101,13 +101,10 @@ def _annotate(route: Any, component: Any) -> None:
 
 
 ACRONYMS = {"hrv": "HRV", "fit": "FIT", "dto": "DTO", "id": "ID"}
-TITLES = {"healthz": "Service health"}
 
 
 def _title(operation_id: str) -> str:
     """A readable title from an operation id: delete_activity -> "Delete activity"."""
-    if operation_id in TITLES:
-        return TITLES[operation_id]
     words = [ACRONYMS.get(w, w) for w in operation_id.split("_") if w]
     if not words:
         return operation_id
@@ -178,6 +175,13 @@ def create_mcp() -> FastMCP:
                 mcp_type=MCPType.EXCLUDE,
             ),
             RouteMap(methods=["POST"], pattern=r"^/v1/sessions/upload$", mcp_type=MCPType.EXCLUDE),
+            # Duplicates of other tools, which only make a model choose
+            # between two names for one thing: the same search as
+            # find_exercise, the same login check as garmin_status, and
+            # list_activities with a limit of 1. All stay on the HTTP API.
+            RouteMap(methods=["GET"], pattern=r"^/v1/exercises/search$", mcp_type=MCPType.EXCLUDE),
+            RouteMap(methods=["GET"], pattern=r"^/healthz$", mcp_type=MCPType.EXCLUDE),
+            RouteMap(methods=["GET"], pattern=r"^/v1/activities/last$", mcp_type=MCPType.EXCLUDE),
         ],
     )
 
@@ -295,12 +299,25 @@ def _add_convenience_tools(mcp: FastMCP) -> None:
         )
     )
     def find_exercise(
-        query: str, limit: Annotated[int, Field(ge=1, le=100)] = 10
+        query: Annotated[
+            str,
+            Field(
+                description='Part or all of an exercise name, e.g. "bench", "lat pulldown", "rdl".'
+            ),
+        ],
+        limit: Annotated[int, Field(ge=1, le=100, description="Most matches to return.")] = 10,
     ) -> list[dict[str, str]]:
-        """Find Garmin's category and exercise_name for an exercise.
+        """Search Garmin's strength exercise catalogue by name, best match first; each
+        result has the display name, category and exercise (the variant).
 
-        Always use this before creating a workout or logging a session with an
-        exercise whose Garmin name is not already known.
+        Use it before create_strength_workout, log_strength_session or
+        edit_activity_sets whenever the Garmin pair is not known: those reject any
+        other name, and accept a result's category and exercise as they are.
+        Matching is by word starts ("lat pull" finds "Lat Pull-down"), with plurals
+        and common gym names (rdl, ohp, skull crusher) understood. To turn one
+        free-text name into exactly one exercise or nothing, use match_exercise.
+        Answered from a bundled copy of the catalogue: no Garmin request, no login
+        needed.
         """
         return [e._asdict() for e in catalogue.search(query, limit=limit)]
 
@@ -314,13 +331,24 @@ def _add_convenience_tools(mcp: FastMCP) -> None:
     )
     @_garmin_shaped
     def recent_strength_sessions(
-        count: Annotated[int, Field(ge=1, le=25)] = 5, include_sets: bool = True
+        count: Annotated[
+            int, Field(ge=1, le=25, description="How many sessions, newest first.")
+        ] = 5,
+        include_sets: Annotated[
+            bool, Field(description="False for the list alone, in one request.")
+        ] = True,
     ) -> list[dict[str, Any]]:
-        """Recent completed strength sessions (activities), with their sets.
+        """List the most recent completed strength sessions, newest first, each with
+        its exercises, reps and weights and its total volume (reps times weight over
+        the working sets).
 
-        One call instead of listing activities and then fetching each one's
-        sets. Includes the total volume, which is the sum of reps times weight
-        over the working sets.
+        One call instead of list_activities plus get_activity_sets per session. It
+        takes no dates: for a period, use list_activities with activity_type
+        strength_training and start_date. Its sets carry no set_number, so read a
+        session with get_activity_sets before correcting it with edit_activity_sets.
+        One Garmin request per session plus one, and one more the first time in a
+        process (the activity types); a session whose sets cannot be read
+        carries sets_error, and a rate limit stops the call.
         """
         found = activities_service.list_activities(
             limit=count, activity_type=activities_service.STRENGTH
@@ -364,12 +392,20 @@ def _add_convenience_tools(mcp: FastMCP) -> None:
         )
     )
     @_garmin_shaped
-    def week_summary(end_day: date | None = None) -> dict[str, Any]:
-        """Seven days of training and health in one answer.
+    def week_summary(
+        end_day: Annotated[
+            date | None,
+            Field(description="Last day of the seven, YYYY-MM-DD. Default: today."),
+        ] = None,
+    ) -> dict[str, Any]:
+        """Summarise the seven days ending on end_day (default today, in the account's
+        timezone): each day's steps, resting heart rate, sleep hours and morning
+        readiness, plus the activities started in that window (up to 50).
 
-        Covers the week ending on end_day, or today. Gives each day's steps,
-        resting heart rate, sleep and training readiness, plus the activities
-        in that window. A night's sleep belongs to the day it ended on.
+        For one day in full use get_day_summary; for one metric over longer ranges,
+        get_trend, which costs far fewer requests per day. This makes three Garmin
+        requests per day plus one for the activities, over 20 in all, so do not call
+        it repeatedly. A night's sleep belongs to the day it ended on.
         """
         # "Today" in the Garmin profile's timezone, not the machine's or UTC's:
         # after 8pm in New York, UTC is already tomorrow.

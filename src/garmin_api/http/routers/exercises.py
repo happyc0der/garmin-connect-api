@@ -35,10 +35,15 @@ def categories() -> list[str]:
 
 @router.get("/match", operation_id="match_exercise")
 def match(name: str = Query(description="A free-text exercise name.")) -> dict[str, str] | None:
-    """Best-effort map from a free-text name onto the catalogue.
+    """Map one free-text exercise name, such as one exported from another app, onto
+    exactly one catalogue exercise, or return null when no single match is certain.
 
-    Returns null rather than a guess when nothing is close enough, so a name
-    from another app never silently becomes the wrong lift.
+    Use it when converting names from another source, where a wrong guess would
+    log the wrong lift. To browse candidates and choose, use find_exercise, which
+    returns a ranked list. Only a certain match is returned: the exact or
+    normalised name, the same words up to a typo, plural or hyphenation, or a
+    search with one hit that adds at most an implement (barbell, dumbbell,
+    kettlebell). No Garmin request.
     """
     found = catalogue.match(name)
     return found._asdict() if found else None

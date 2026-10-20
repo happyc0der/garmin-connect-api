@@ -34,8 +34,8 @@ def log_strength(spec: StrengthSessionSpec) -> dict[str, Any]:
     If the account shares to Strava or another app, the activity may be posted
     there too, publicly, and deleting it from Garmin does not delete it there.
 
-    Name exercises with Garmin's category and exercise_name pair; search the
-    exercise catalogue first if unsure. Logging the identical session again is
+    Name exercises with Garmin's category and exercise_name pair, which
+    find_exercise gives. Logging the identical session again is
     reported as a duplicate and changes nothing; logging it with any set
     changed creates a second activity, so correct one with edit_activity_sets.
     """

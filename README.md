@@ -14,9 +14,9 @@ strength sessions, and weigh-ins with full body composition.
 
 ## Status
 
-v0.2. Reads activities with per-set strength detail, laps and pool-swim lengths, daily health,
+v0.3. Reads activities with per-set strength detail, laps and pool-swim lengths, daily health,
 trends over up to two years and named personal records; writes strength, run, ride and swim
-workouts, completed strength sessions, set corrections and weigh-ins with body composition. 41
+workouts, completed strength sessions, set corrections and weigh-ins with body composition. 38
 tools, every one checked against a real account. Bug reports and feature requests go to
 [GitHub Issues](https://github.com/happyc0der/garmin-connect-api/issues).
 
@@ -66,8 +66,9 @@ on 20 seconds rest, in a 25-yard pool".
 
 ## What it can do
 
-41 tools, each annotated so your client knows which only read (27), which add something (8) and
-which delete or overwrite (6), and can ask before running those.
+38 tools, each annotated so your client knows which only read (24), which add something (8) and
+which delete or overwrite (6), and can ask before running those. Every argument, down to a
+workout step's pace target, carries a description.
 
 | Read | Write |
 | --- | --- |
@@ -225,6 +226,19 @@ host but `localhost`, which defeats DNS rebinding. Binding beyond localhost requ
 | `GARMINTOKENS` | Where tokens are stored. Defaults to `~/.garmin-api/default`. |
 | `GARMIN_API_KEY` | Required to bind the HTTP service beyond localhost. |
 | `GARMIN_API_HOSTS` | Extra host names the HTTP and MCP servers answer to, comma-separated. Needed for any name but localhost. |
+
+## Docker
+
+The `Dockerfile` builds the MCP server from a checkout. Tokens live in `/tokens` inside the
+container; mount an existing directory there and run as your own user, so refreshed tokens stay
+yours. Logging in works inside the container too:
+
+```bash
+mkdir -p ~/.garmin-api/default
+docker build -t garmin-connect-api .
+docker run -it --rm --user "$(id -u):$(id -g)" -v ~/.garmin-api/default:/tokens garmin-connect-api garmin login
+docker run -i --rm --user "$(id -u):$(id -g)" -v ~/.garmin-api/default:/tokens garmin-connect-api
+```
 
 ## Development
 

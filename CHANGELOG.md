@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.3.0 (2026-10-19)
+
+The MCP tools, rewritten for the model that reads them, against Glama's tool definition quality
+rubric. The HTTP API is unchanged.
+
+### Changed
+
+- **Three tools leave the MCP server**, as duplicates that only made a model choose:
+  `search_exercises` (the same search as `find_exercise`), `healthz` (`garmin_status` reports the
+  same login) and `get_last_activity` (`list_activities` with a limit of 1). All three remain on
+  the HTTP API. 38 tools remain.
+- **Descriptions draw the lines between siblings**: the single-day health tools against
+  `get_day_summary`, `week_summary` and `get_trend`; `find_exercise` against `match_exercise`;
+  workouts against sessions; `edit_activity_sets` against `update_activity`. They say what each
+  tool returns and what a write changes, including that deleting a set renumbers the ones after
+  it, so a repeated delete removes a different set.
+- **Every argument is described, nested ones included**: a workout step's end and pace target, a
+  set's reps and weight, each body composition reading with its unit, and which tool supplies
+  each id. A test now fails on any argument without one.
+- `get_trend`'s description no longer says readiness is fetched four weeks at a time; 0.2.6
+  changed that to a year.
+
+### Added
+
+- **A Dockerfile** for the stdio server, for directories that build a server to inspect it.
+  Tokens live in `/tokens`; the README shows how to mount them and run as your own user.
+
 ## 0.2.6 (2026-10-19)
 
 ### Changed

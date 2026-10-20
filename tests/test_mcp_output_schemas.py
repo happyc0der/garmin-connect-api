@@ -79,7 +79,6 @@ GARMIN = {
             "startTimeLocal": "2026-09-21T07:00:00.0",
         },
     },
-    "get_last_activity": ACTIVITY,
     "get_activity_exercise_sets": SETS,
     "get_activity_types": TYPES,
     "get_stats": STATS,
@@ -160,7 +159,6 @@ CALLS: list[tuple[str, dict[str, Any]]] = [
     ("list_activities", {"limit": 5, "activity_type": "strength_training"}),
     ("list_activities", {"start_date": "2026-08-01", "end_date": "2026-08-30"}),
     ("get_activity", {"activity_id": 1}),
-    ("get_last_activity", {}),
     ("get_activity_sets", {"activity_id": 1}),
     ("get_day_summary", {"day": "2026-10-18"}),
     ("get_sleep", {"day": "2026-10-18"}),
@@ -182,7 +180,6 @@ CALLS: list[tuple[str, dict[str, Any]]] = [
     ("week_summary", {"end_day": "2026-10-18"}),
     ("garmin_status", {}),
     ("find_exercise", {"query": "bench"}),
-    ("search_exercises", {"q": "row"}),
 ]
 
 

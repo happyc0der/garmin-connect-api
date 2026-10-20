@@ -239,8 +239,8 @@ class SetChange(ExerciseSpec):
             "Empty for just the category."
         ),
     )
-    reps: int | None = Field(default=None, ge=0, le=999)
-    weight_kg: float | None = Field(default=None, ge=0, le=1000)
+    reps: int | None = Field(default=None, ge=0, le=999, description="The new rep count.")
+    weight_kg: float | None = Field(default=None, ge=0, le=1000, description="The new weight, kg.")
 
     @model_validator(mode="after")
     def _something(self) -> SetChange:
@@ -254,5 +254,8 @@ class SetChange(ExerciseSpec):
 class SetEdit(WriteSpec):
     """Corrections to an activity's sets: change some, delete some, or both."""
 
-    changes: list[SetChange] = Field(default_factory=list)
+    changes: list[SetChange] = Field(
+        default_factory=list,
+        description="Edits, each applied to the working sets it lists.",
+    )
     delete: list[int] = Field(default_factory=list, description="Working set numbers to remove.")
