@@ -8,13 +8,13 @@
     "source": "github"
   },
   "websiteUrl": "https://github.com/happyc0der/garmin-connect-api",
-  "version": "0.2.5",
+  "version": "0.2.6",
   "packages": [
     {
       "registryType": "pypi",
       "registryBaseUrl": "https://pypi.org",
       "identifier": "garmin-connect-api",
-      "version": "0.2.5",
+      "version": "0.2.6",
       "runtimeHint": "uvx",
       "transport": {
         "type": "stdio"

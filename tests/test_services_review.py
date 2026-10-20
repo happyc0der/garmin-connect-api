@@ -288,11 +288,11 @@ def test_daily_metrics_still_count_days(fake_garmin: dict[str, Any]) -> None:
     assert trends.trend("readiness", "2026-01-01", "2026-01-01").summary["days_with_data"] == 1
 
 
-GARMIN_LIMITS = {
+GARMIN_LIMITS = {  # as measured against a real account on 19 Oct 2026
     "get_daily_stress_stats": 28,
     "get_daily_body_battery_stats": 28,
-    "get_hrv_data_range": 366,
-    "get_training_readiness_range": 28,
+    "get_hrv_data_range": 367,
+    "get_training_readiness_range": 367,
 }
 
 

@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.6 (2026-10-19)
+
+### Changed
+
+- **Readiness trends take a twelfth of the requests.** Measured against a real account, Garmin
+  answers readiness for at least 367 days per request, so a two-year readiness trend is now 2
+  requests instead of 27; it had been fetched four weeks at a time while the limit was unknown.
+  The same check confirmed HRV's limit (366 days apart) and that a pool swim's length is given in
+  the pool's own unit, as the lap tools read it.
+
 ## 0.2.5 (2026-10-19)
 
 A fifth review round: a cold read of the whole package by a reviewer new to it, and 0.2.4's own
