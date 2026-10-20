@@ -126,11 +126,15 @@ def steps(
 
 @router.get("/training-readiness/{day}", operation_id="get_training_readiness")
 def training_readiness(day: date = Path(description="The calendar date, YYYY-MM-DD.")) -> Any:
-    """Garmin's readiness score and the factors behind it, every entry of the day.
+    """Return every training readiness entry Garmin recorded for one day: the score,
+    its level and the factors behind it.
 
-    Garmin recomputes it through the day. The entry with inputContext
-    AFTER_WAKEUP_RESET is the morning score, which the day summary and the
-    readiness trend use.
+    Use it for why the score is what it is. Garmin recomputes readiness through
+    the day; the entry whose inputContext is AFTER_WAKEUP_RESET is the morning
+    score, which get_day_summary gives on its own and get_trend with metric
+    readiness follows over weeks or months. One Garmin request. The reply is
+    Garmin's JSON as it comes, usually a list of entries; null or empty when
+    nothing was recorded.
     """
     return service.training_readiness(day)
 
