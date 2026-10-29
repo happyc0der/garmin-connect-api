@@ -254,7 +254,10 @@ def get_trend(
     The summary gives days_with_data (periods_with_data for VO2 max, which
     Garmin groups itself), the average, min and max of the days, the first and
     last day, and change: the last whole period's average minus the first
-    whole period's, so a week the range cuts short does not count.
+    whole period's, so a week the range cuts short does not count. Steps,
+    stress and body_battery keep adding up until midnight, so for those a
+    range reaching today summarises the days before it: today stays in the
+    points, and the summary names it under in_progress.
     """
     from ...services import trends
 

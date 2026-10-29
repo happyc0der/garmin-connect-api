@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.3.2 (2026-10-28)
+
+### Fixed
+
+- **A trend reaching today summarised today's running count as a finished day.** Asked at 9am
+  for 30 days of steps, `get_trend` reported the morning's few hundred steps as the minimum and a
+  drop of thousands as the change, which was only the clock. For steps, stress and body battery,
+  which Garmin keeps adding to until midnight, the summary now covers the days before today and
+  names today under `in_progress`; today's value stays in the points. A week ending today no
+  longer counts as a whole week. Sleep, HRV, readiness and weight are settled by morning and keep
+  today. Reported, with the fix's shape, by [@mattabate](https://github.com/mattabate) in #11.
+
 ## 0.3.1 (2026-10-19)
 
 ### Fixed
