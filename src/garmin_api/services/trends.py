@@ -42,6 +42,11 @@ WINDOW_DAYS = {
     "get_rhr_daily": 365,
 }
 
+# Garmin keeps adding to these until the day ends, so today's value is a
+# running count, not a day. Sleep, HRV, readiness and weight are settled by
+# morning, and today's is the freshest real value.
+FILLING = frozenset({Metric.steps, Metric.stress, Metric.body_battery})
+
 
 def trend(
     metric: Metric | str,
@@ -71,9 +76,18 @@ def trend(
     first = period_of(start_d, chosen) if native else start_d
     daily = [p for p in daily if first <= p.period <= end_d]
     points = sorted(daily, key=lambda p: p.period) if native else roll_up(daily, chosen)
+    # The summary covers finished days only. Today, while it is still filling,
+    # stays in the points but out of the summary and out of any week or month
+    # it would complete; a range of today alone still answers, flagged.
+    settled = _settled(metric, end_d)
+    complete = [p for p in daily if p.period <= settled] or daily
     # The change is between whole weeks or months: a range ending today cuts
     # its last week short, and a stub of one day says little about a trend.
-    whole = [p for p in points if _whole(p.period, chosen, start_d, end_d)]
+    whole = [p for p in points if _whole(p.period, chosen, start_d, settled)]
+    fallback = roll_up(complete, chosen) if settled < end_d else points
+    summary = summarise(whole if len(whole) >= 2 else fallback, complete)
+    if settled < end_d:
+        summary["in_progress"] = (settled + timedelta(days=1)).isoformat()
     return Trend(
         metric=metric,
         unit=UNITS[metric],
@@ -81,8 +95,19 @@ def trend(
         end=end_d,
         aggregation=chosen,
         points=points,
-        summary=summarise(whole if len(whole) >= 2 else points, daily),
+        summary=summary,
     )
+
+
+def _settled(metric: Metric, end: date) -> date:
+    """The last day of the range whose value is final."""
+    if metric not in FILLING:
+        return end
+    # The account's date is never more than two days from the machine's,
+    # whatever the timezones, so a range ending before that cannot reach today.
+    if end < date.today() - timedelta(days=2):
+        return end
+    return min(end, today() - timedelta(days=1))
 
 
 def _day(value: Any) -> date | None:
@@ -97,7 +122,7 @@ def _day(value: Any) -> date | None:
 def _whole(period: date, aggregation: Aggregation, start: date, end: date) -> bool:
     """Whether the range covers all of the week or month that starts on ``period``."""
     if aggregation is Aggregation.day:
-        return True
+        return start <= period <= end
     if aggregation is Aggregation.week:
         last = period + timedelta(days=6)
     else:
